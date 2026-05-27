@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from auth import Authed, Principal, authed, verify_token
 from agent import run_agent
 from session import load_history, resolve_session_id, save_turn
+from skills import get_skill, load_skills, run_skill
 
 app = FastAPI(title="Vantage API")
 
@@ -70,3 +71,29 @@ async def ask(req: AskRequest, caller: Authed = Depends(authed)):
         raise HTTPException(status_code=502, detail=f"agent error: {exc}")
     save_turn(session_id, req.query, result["answer"])
     return {**result, "session_id": session_id}
+
+
+@app.get("/skills")
+def list_skills(principal: Principal = Depends(verify_token)):
+    """List the available reusable Skills (any authenticated role). See app/skills.py."""
+    return {"skills": [
+        {"name": s.name, "description": s.description, "parameters": s.parameters}
+        for s in load_skills().values()
+    ]}
+
+
+class SkillRunRequest(BaseModel):
+    params: dict = {}
+
+
+@app.post("/skills/{name}/run")
+async def run_named_skill(name: str, req: SkillRunRequest, caller: Authed = Depends(authed)):
+    """Invoke a Skill by name. It runs the agent loop restricted to the skill's tools, with the
+    caller's token forwarded (RBAC still enforced per tool at the MCP boundary)."""
+    skill = get_skill(name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail=f"unknown skill: {name}")
+    try:
+        return await run_skill(skill, req.params, token=caller.token, principal=caller.principal)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"skill error: {exc}")

@@ -1,0 +1,9 @@
+{
+  "name": "escalation-summary",
+  "description": "Customer escalation/risk brief for an account: open issues, the most urgent summarised, an overall risk level (Low/Medium/High/Critical), a recommended next action (advice), and any missing information. Read-only; persists nothing.",
+  "parameters": [
+    {"name": "customer", "description": "Customer name (or partial name).", "required": true}
+  ],
+  "allowed_tools": ["get_open_issues", "summarise_issue_history"],
+  "instructions": "Produce a customer escalation brief for: {customer}.\n\n1. Look up the customer's OPEN issues.\n2. For the one or two most urgent, read their history to understand the current state.\n3. Assess OVERALL RISK as exactly one of: Low, Medium, High, or Critical. Use this rubric: High or Critical if there is an open KYC/compliance hold blocking go-live, repeated payout failures, multiple high/critical open issues, a critical integration down, or long-unresolved issues; Low if there are few or no open issues and all are low priority; Medium otherwise.\n4. Recommend a NEXT ACTION as advice only — it is NOT saved (an admin would record it separately).\n5. List any MISSING INFORMATION that would change the assessment.\n\nFormat the answer with clear headings: Risk level, Why (cite the specific open issues), Recommended next action (advice), Missing info. Ground everything in the tool results; never invent issues or facts. If the customer has no open issues, the risk is Low. If the customer is not found or the name is ambiguous, say so plainly instead of guessing."
+}
