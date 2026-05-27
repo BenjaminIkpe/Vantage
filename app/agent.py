@@ -9,6 +9,7 @@ for observability. One MCP session is opened per request and torn down at the en
 """
 import json
 import os
+import time
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -58,6 +59,11 @@ async def run_agent(query: str, token: str, principal: Principal,
     """
     system_prompt = system or _system_prompt(principal)
     trace: list[dict] = []
+    started = time.perf_counter()
+
+    def _elapsed_ms() -> int:
+        return round((time.perf_counter() - started) * 1000)
+
     async with streamablehttp_client(MCP_URL, headers={"Authorization": f"Bearer {token}"}) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -82,8 +88,12 @@ async def run_agent(query: str, token: str, principal: Principal,
                     results = []
                     for block in resp.content:
                         if block.type == "tool_use":
+                            t0 = time.perf_counter()
                             out = _payload(await session.call_tool(block.name, block.input))
-                            trace.append({"tool": block.name, "input": block.input, "result": out})
+                            trace.append({
+                                "tool": block.name, "input": block.input, "result": out,
+                                "ms": round((time.perf_counter() - t0) * 1000),
+                            })
                             results.append({
                                 "type": "tool_result",
                                 "tool_use_id": block.id,
@@ -92,6 +102,7 @@ async def run_agent(query: str, token: str, principal: Principal,
                     messages.append({"role": "user", "content": results})
                     continue
                 answer = "".join(b.text for b in resp.content if b.type == "text")
-                return {"answer": answer, "trace": trace}
+                return {"answer": answer, "trace": trace, "elapsed_ms": _elapsed_ms()}
 
-    return {"answer": "Stopped after the step limit without a final answer.", "trace": trace}
+    return {"answer": "Stopped after the step limit without a final answer.",
+            "trace": trace, "elapsed_ms": _elapsed_ms()}
