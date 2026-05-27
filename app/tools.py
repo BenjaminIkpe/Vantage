@@ -6,7 +6,7 @@ role from the verified token before acting. Tools never invent data: a missing
 customer returns `not_found`, near-identical names return `ambiguous`.
 """
 from db import query
-from auth import Principal
+from security import Principal
 
 _CUSTOMER_COLS = "id, name, account_ref, region, postcode, segment, tier"
 

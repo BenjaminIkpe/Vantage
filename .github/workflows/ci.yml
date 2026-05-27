@@ -22,7 +22,12 @@ jobs:
         run: docker compose config --quiet
       - name: Install API deps
         run: pip install -r app/requirements.txt
+      - name: Install MCP server deps
+        run: pip install -r mcp_server/requirements.txt
       - name: Import + syntax check
         run: |
           (cd app && python -c "import main")
+          # Import the MCP server from its own dir so the repo root isn't on sys.path
+          # (the SDK's top-level package is `mcp`; our dir is mcp_server/ to avoid shadowing).
+          (cd mcp_server && PYTHONPATH="$GITHUB_WORKSPACE/app" python -c "import server")
           python -m py_compile scripts/*.py
