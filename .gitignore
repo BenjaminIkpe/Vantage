@@ -26,3 +26,6 @@ Vantage-vault/08-Panel-Prep.md
 
 # local caches
 .cache/
+
+# runtime-authored skills (Flow 1) — live on a volume / local dir, not committed
+app/skills_authored/

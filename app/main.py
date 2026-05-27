@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 from auth import Authed, Principal, authed, verify_token
 from agent import run_agent
-from session import load_history, resolve_session_id, save_turn
-from skills import get_skill, load_skills, run_skill
+from session import load_history, load_tools, record_tools, resolve_session_id, save_turn
+from skills import draft_from_session, get_skill, load_skills, run_skill, save_skill
 
 app = FastAPI(title="Vantage API")
 
@@ -70,6 +70,7 @@ async def ask(req: AskRequest, caller: Authed = Depends(authed)):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"agent error: {exc}")
     save_turn(session_id, req.query, result["answer"])
+    record_tools(session_id, [t["tool"] for t in result.get("trace", [])])
     return {**result, "session_id": session_id}
 
 
@@ -97,3 +98,34 @@ async def run_named_skill(name: str, req: SkillRunRequest, caller: Authed = Depe
         return await run_skill(skill, req.params, token=caller.token, principal=caller.principal)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"skill error: {exc}")
+
+
+class DraftFromSessionRequest(BaseModel):
+    session_id: str
+    name: str | None = None
+
+
+@app.post("/skills/draft-from-session")
+async def draft_skill(req: DraftFromSessionRequest, principal: Principal = Depends(verify_token)):
+    """Turn a finished session into a reusable skill DRAFT (Flow 1). Not saved — review it, then
+    POST /skills to keep it. Any authenticated role may author (a skill can't exceed its caller's
+    permissions; RBAC stays in the tools)."""
+    return await draft_from_session(load_history(req.session_id), load_tools(req.session_id), req.name)
+
+
+class SaveSkillRequest(BaseModel):
+    name: str
+    instructions: str
+    description: str = ""
+    parameters: list[dict] = []
+    allowed_tools: list[str] = []
+
+
+@app.post("/skills")
+def create_skill(req: SaveSkillRequest, principal: Principal = Depends(verify_token)):
+    """Persist an authored skill (the reviewed draft). Returns the saved skill."""
+    try:
+        skill = save_skill(req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "saved", "name": skill.name, "allowed_tools": skill.allowed_tools}

@@ -57,3 +57,24 @@ def save_turn(session_id: str, user_query: str, assistant_answer: str) -> None:
         _redis().set(f"session:{session_id}", json.dumps(history), ex=TTL_SECONDS)
     except Exception:
         pass  # best-effort; losing session memory must never fail the request
+
+
+def record_tools(session_id: str, tool_names: list[str]) -> None:
+    """Accumulate the set of tools used this session — the basis for a drafted skill's
+    allowed_tools (Flow 1: a skill does what you just did, with the tools you just used)."""
+    if not tool_names:
+        return
+    try:
+        key = f"session:{session_id}:tools"
+        _redis().sadd(key, *tool_names)
+        _redis().expire(key, TTL_SECONDS)
+    except Exception:
+        pass
+
+
+def load_tools(session_id: str) -> list[str]:
+    """The distinct tools used in this session, sorted; [] if none/unavailable."""
+    try:
+        return sorted(_redis().smembers(f"session:{session_id}:tools"))
+    except Exception:
+        return []

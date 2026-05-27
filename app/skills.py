@@ -14,13 +14,18 @@ S2) is the first seeded skill; users will be able to author their own later.
 """
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent import run_agent
+from llm import MODEL, aclient
 from security import Principal
 
+# Seeded skills ship read-only in the image; authored skills are written at runtime to a
+# writable dir on a Docker volume (so they survive a rebuild). Authored skills override seeded.
 SKILLS_DIR = Path(os.getenv("SKILLS_DIR", str(Path(__file__).parent / "skills_library")))
+AUTHORED_SKILLS_DIR = Path(os.getenv("AUTHORED_SKILLS_DIR", str(Path(__file__).parent / "skills_authored")))
 
 _RUNNER_SYSTEM = (
     "You are Vantage executing a saved skill for an Acme Operations staff member whose role is: "
@@ -50,25 +55,58 @@ class Skill:
         return text
 
 
+def _skill_from_data(data: dict) -> Skill:
+    return Skill(
+        name=data["name"],
+        description=data.get("description", ""),
+        instructions=data["instructions"],
+        parameters=data.get("parameters", []),
+        allowed_tools=data.get("allowed_tools", []),
+    )
+
+
 def load_skills() -> dict[str, Skill]:
-    """Load every skill JSON from SKILLS_DIR, keyed by name."""
+    """Load skill JSONs from the seeded dir then the authored dir (authored overrides)."""
     skills: dict[str, Skill] = {}
-    if not SKILLS_DIR.is_dir():
-        return skills
-    for path in sorted(SKILLS_DIR.glob("*.json")):
-        data = json.loads(path.read_text())
-        skills[data["name"]] = Skill(
-            name=data["name"],
-            description=data.get("description", ""),
-            instructions=data["instructions"],
-            parameters=data.get("parameters", []),
-            allowed_tools=data.get("allowed_tools", []),
-        )
+    for directory in (SKILLS_DIR, AUTHORED_SKILLS_DIR):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.json")):
+            data = json.loads(path.read_text())
+            skills[data["name"]] = _skill_from_data(data)
     return skills
 
 
 def get_skill(name: str) -> Skill | None:
     return load_skills().get(name)
+
+
+def _slug(name: str) -> str:
+    """A safe skill name / filename: lowercase kebab-case, alnum + dashes."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+    return slug[:48]
+
+
+def save_skill(data: dict) -> Skill:
+    """Validate and persist an authored skill to the writable dir; return the saved Skill."""
+    name = _slug(data.get("name", ""))
+    if not name:
+        raise ValueError("skill needs a name")
+    if not data.get("instructions"):
+        raise ValueError("skill needs instructions")
+    skill = Skill(
+        name=name,
+        description=data.get("description", ""),
+        instructions=data["instructions"],
+        parameters=data.get("parameters", []),
+        allowed_tools=data.get("allowed_tools", []),
+    )
+    AUTHORED_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    (AUTHORED_SKILLS_DIR / f"{name}.json").write_text(json.dumps({
+        "name": skill.name, "description": skill.description, "instructions": skill.instructions,
+        "parameters": skill.parameters, "allowed_tools": skill.allowed_tools,
+    }, indent=2))
+    return skill
 
 
 async def run_skill(skill: Skill, params: dict, token: str, principal: Principal) -> dict:
@@ -88,3 +126,67 @@ async def run_skill(skill: Skill, params: dict, token: str, principal: Principal
         system=system, allowed_tools=skill.allowed_tools,
     )
     return {"skill": skill.name, **result}
+
+
+# --- authoring: turn a finished session into a reusable skill draft (Flow 1) -------------
+
+_DRAFTER_SYSTEM = (
+    "You turn a finished conversation between an Acme Operations staff member and the Vantage "
+    "assistant into a reusable SKILL that reproduces what was done, for future inputs. Read the "
+    "conversation, then call propose_skill with: a short kebab-case name; a one-line description "
+    "of when to use it; generalised step-by-step instructions that **replace the specific values "
+    "the user supplied (e.g. a customer name) with {placeholder} tokens**; and the list of those "
+    "placeholders as parameters. Be faithful — capture only what was actually done, don't add "
+    "steps. Keep parameters minimal (usually just the one or two obvious inputs)."
+)
+
+_PROPOSE_TOOL = {
+    "name": "propose_skill",
+    "description": "Propose a reusable skill that generalises the conversation.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Short kebab-case skill name."},
+            "description": {"type": "string", "description": "One line: when to use this skill."},
+            "instructions": {"type": "string", "description": "Generalised steps; specific inputs replaced with {placeholder} tokens."},
+            "parameters": {
+                "type": "array",
+                "items": {"type": "object", "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "required": {"type": "boolean"},
+                }, "required": ["name", "description"]},
+            },
+        },
+        "required": ["name", "description", "instructions", "parameters"],
+    },
+}
+
+
+def _render_conversation(history: list[dict]) -> str:
+    return "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
+
+
+async def draft_from_session(history: list[dict], tools_used: list[str], name: str | None = None) -> dict:
+    """Generalise a session into a skill DRAFT (not saved). allowed_tools is the set of tools the
+    session actually used (deterministic); the LLM writes the name/description/parameterised
+    instructions/parameters. The caller reviews, then POSTs it to save."""
+    if not history:
+        return {"status": "error", "reason": "no conversation in this session to turn into a skill"}
+
+    prompt = "Conversation to turn into a reusable skill:\n\n" + _render_conversation(history)
+    if name:
+        prompt += f"\n\nUse this skill name: {name}"
+
+    resp = await aclient().messages.create(
+        model=MODEL, max_tokens=1024, system=_DRAFTER_SYSTEM,
+        messages=[{"role": "user", "content": prompt}],
+        tools=[_PROPOSE_TOOL], tool_choice={"type": "tool", "name": "propose_skill"},
+    )
+    draft = next((b.input for b in resp.content if b.type == "tool_use"), None)
+    if draft is None:
+        return {"status": "error", "reason": "could not draft a skill from this session"}
+
+    draft["name"] = _slug(name or draft.get("name", "skill"))
+    draft["allowed_tools"] = tools_used  # the skill may use exactly the tools the session used
+    return {"status": "draft", "skill": draft}
