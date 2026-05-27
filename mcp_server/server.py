@@ -14,6 +14,7 @@ touching Postgres. A missing/invalid token is rejected with 401 by the transport
 Currently exposes the three read tools; the write tools land in a later slice and will
 appear to the agent automatically via MCP discovery.
 """
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
@@ -22,7 +23,17 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.auth.middleware.auth_context import get_access_token
 
 from security import Principal, verify_access_token
-from tools import get_customer_profile, get_open_issues, summarise_issue_history
+from tools import (
+    create_next_action,
+    get_customer_profile,
+    get_open_issues,
+    summarise_issue_history,
+    update_issue,
+    update_next_action,
+)
+
+logging.basicConfig(level=logging.INFO)
+_audit_log = logging.getLogger("vantage.audit")
 
 ISSUER = os.getenv("KEYCLOAK_ISSUER", "http://localhost:8080/realms/vantage")
 PORT = int(os.getenv("MCP_PORT", "8001"))
@@ -39,6 +50,7 @@ class VantageToken(AccessToken):
 
     username: str
     roles: list[str]
+    subject: str | None = None  # token `sub`, for write attribution
 
 
 class KeycloakVerifier(TokenVerifier):
@@ -55,6 +67,7 @@ class KeycloakVerifier(TokenVerifier):
             scopes=principal.roles,  # realm roles surfaced as scopes for the framework
             username=principal.username,
             roles=principal.roles,
+            subject=principal.subject,
         )
 
 
@@ -72,7 +85,17 @@ def _principal() -> Principal:
     tok = get_access_token()
     if not isinstance(tok, VantageToken):  # auth is required, so this is defensive
         raise RuntimeError("no authenticated principal on the request")
-    return Principal(username=tok.username, roles=tok.roles)
+    return Principal(username=tok.username, roles=tok.roles, subject=tok.subject)
+
+
+def _audit(tool: str, principal: Principal, target, result: dict) -> dict:
+    """Log a write attempt + its decision for the audit trail — identifiers and action only,
+    never the token or free-text bodies (09-Security T7). Returns the result unchanged."""
+    _audit_log.info(
+        "tool=%s user=%s roles=%s target=%s decision=%s",
+        tool, principal.username, principal.roles, target, result.get("status"),
+    )
+    return result
 
 
 @mcp.tool(
@@ -115,6 +138,58 @@ def _get_open_issues(name: str) -> dict:
 )
 def _summarise_issue_history(issue_id: int) -> dict:
     return summarise_issue_history(issue_id, _principal())
+
+
+# --- write tools (RBAC-checked inside the tool; every attempt audited) -------
+
+
+@mcp.tool(
+    name="update_issue",
+    description=(
+        "Add a note to an issue and/or change its status (requires the support or admin "
+        "role). Pass issue_id and a note, a new status (open/in_progress/pending/resolved/"
+        "closed), or both. Writes an attributable, timestamped update. Returns status "
+        "'denied' if the caller's role may not update issues — relay that refusal to the "
+        "user; do not retry. Returns 'not_found' for an unknown issue."
+    ),
+)
+def _update_issue(issue_id: int, note: str | None = None, status: str | None = None) -> dict:
+    principal = _principal()
+    result = update_issue(issue_id, principal, note=note, status=status)
+    return _audit("update_issue", principal, f"issue={issue_id} status={status!r}", result)
+
+
+@mcp.tool(
+    name="create_next_action",
+    description=(
+        "Create a formal next action on an issue (requires the admin role). Pass issue_id, "
+        "a description, and optionally a due_date (YYYY-MM-DD). Returns status 'denied' if "
+        "the caller is not an admin — relay that refusal to the user; do not retry. Returns "
+        "'not_found' for an unknown issue. (Sales/support may receive a next action as "
+        "advice, but only an admin can record one.)"
+    ),
+)
+def _create_next_action(issue_id: int, description: str, due_date: str | None = None) -> dict:
+    principal = _principal()
+    result = create_next_action(issue_id, principal, description=description, due_date=due_date)
+    return _audit("create_next_action", principal, f"issue={issue_id}", result)
+
+
+@mcp.tool(
+    name="update_next_action",
+    description=(
+        "Update a next action's status (open/done/cancelled), description, or due_date by "
+        "next_action_id (requires the admin role). Returns status 'denied' if the caller is "
+        "not an admin — relay that refusal; do not retry. Returns 'not_found' for an "
+        "unknown id."
+    ),
+)
+def _update_next_action(next_action_id: int, status: str | None = None,
+                        description: str | None = None, due_date: str | None = None) -> dict:
+    principal = _principal()
+    result = update_next_action(next_action_id, principal, status=status,
+                                description=description, due_date=due_date)
+    return _audit("update_next_action", principal, f"next_action={next_action_id} status={status!r}", result)
 
 
 if __name__ == "__main__":
