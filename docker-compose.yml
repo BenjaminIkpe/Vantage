@@ -41,6 +41,28 @@ services:
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
 
+  mcp:
+    # The custom MCP server (ADR-003): exposes the named, RBAC-checked tools over
+    # Streamable HTTP. Only this service holds the DB credentials. Built from the repo
+    # root so it can reuse app/{security,db,tools}.py (see mcp_server/Dockerfile).
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://vantage:changeme@db:5432/vantage
+      KEYCLOAK_URL: http://keycloak:8080                       # internal — JWKS/backchannel
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/vantage    # public — matches token `iss`
+      KEYCLOAK_REALM: vantage
+      MCP_PORT: 8001
+      MCP_RESOURCE_URL: http://localhost:8001/mcp
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    ports:
+      - "8001:8001"   # published for dev smoke-testing; container-to-container in prod
+
   api:
     build: ./app
     environment:
