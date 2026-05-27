@@ -1,0 +1,28 @@
+# env / secrets
+.env
+*.env
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# node (if UI)
+node_modules/
+dist/
+
+# os
+.DS_Store
+
+# obsidian volatile state
+**/.obsidian/workspace*.json
+
+# internal panel prep — kept out of the submission
+Vantage-vault/08-Panel-Prep.md
+
+# local caches
+.cache/
