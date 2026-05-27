@@ -7,30 +7,28 @@ updated: 2026-05-27
 
 # NOW — where we are
 
-> [!NOTE] How this file works
-> Cursor: the single source of truth for where the project is right now. Overwritten each session. Start here. (Plain Markdown links, GitHub-renderable.)
+> [!NOTE] Cursor — single source of truth; overwritten each session; start here. (Plain Markdown links, GitHub-renderable.)
 
-**Project:** Vantage — agentic enterprise assistant for *Acme Operations* (a B2B payments platform). EY Applied AI Engineer take-home.
+**Project:** Vantage — agentic enterprise assistant for *Acme Operations* (B2B payments platform). EY Applied AI Engineer take-home.
 **Deadline:** 2026-06-02. One-hour panel follows.
-**Status:** ✅ **Slice 0 + 1a DONE** — full stack (Keycloak + Redis + API) running in **GitHub Codespaces**; **auth gate validated end-to-end** (JWT verified, role extracted, forged/missing tokens → 401).
+**Status:** ✅ **Full stack INTEGRATED & running on `main`** in Codespaces — data + auth + API together. Parallel tracks converged.
 
-## Parallel build (worktrees, disjoint files)
-- **Track A — infra/API** (`track/infra`, this dir): devcontainer, docker-compose (db/redis/keycloak/api), Keycloak realm, FastAPI auth gate. **Running.**
-- **Track B — data** (`track/data`, `/Users/benji/code/Vantage-data`): schema + seed, validating against local Postgres.
-- Next integration: merge Track B so the DB + tools come online.
+## Proven (Codespace, `main`)
+- `docker compose up` → db + redis + keycloak + api all healthy.
+- **Seed loaded:** 12 customers · 40 issues · 132 updates · 14 next-actions.
+- **Auth:** `support` → `support_user`, `admin-user` → `admin`; forged/missing tokens → 401. Realm user ids aligned to seed `keycloak_id` (token→users join ready for write-tool attribution).
 
-## Proven in the Codespace
-- `docker compose up` → Keycloak + Redis + API.
-- `/health` ok; `/ready` green (redis + keycloak).
-- `support` → token → `/whoami` → `{username: support, roles: [support_user]}`. No/tampered token → **401**.
+## Branches
+- `main` = integrated full stack (both tracks merged). **Build continues here.**
+- `track/infra`, `track/data` = retired (merged).
+- ⏳ Branch protection on `main` (require `data-ci`) — to set next.
 
-## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security model: [09-Security](09-Security.md)
+## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security: [09-Security](09-Security.md)
 
 ## Next 3 moves
-1. **Merge Track B (data)** → `db/schema.sql` + `db/seed.sql` into the running stack (Postgres init).
-2. **Build the 5 tools** (`get_customer_profile`, `get_open_issues`, `summarise_issue_history`, `update_issue`, `create`/`update_next_action`) — each RBAC-checked (T2), parameterised SQL (T3), exposed via the MCP server.
-3. **Agent loop** (Claude tool-calling) wiring the tools, behind the auth gate.
+1. **Set branch protection** on `main` (require `data-ci`) — then changes go via PR.
+2. **Build the 5 tools** (`get_customer_profile`, `get_open_issues`, `summarise_issue_history`, `update_issue`, `create`/`update_next_action`) — RBAC-checked at the tool (ADR-002), parameterised SQL (T3), against the seeded DB.
+3. **MCP server** (custom, HTTP) exposing the tools → **agent loop** (Claude tool-calling) behind the auth gate.
 
 ## Open questions
-- Track B status — coordinate the merge (it owns `db/`, `scripts/`).
-- Demo-day rehearsal on Codespaces (idle timeout 90m set; screen-recording fallback).
+- Demo-day rehearsal on Codespaces (idle 90m; screen-recording fallback).
