@@ -8,36 +8,29 @@ updated: 2026-05-27
 # NOW — where we are
 
 > [!NOTE] How this file works
-> This is the cursor: the single source of truth for *where the project is right now*. It is **overwritten** each working session, not appended. Start here every time.
+> Cursor: the single source of truth for where the project is right now. Overwritten each session. Start here. (Plain Markdown links, GitHub-renderable.)
 
 **Project:** Vantage — agentic enterprise assistant for *Acme Operations* (a B2B payments platform). EY Applied AI Engineer take-home.
 **Deadline:** 2026-06-02. One-hour panel follows.
-**Status:** Design locked; **BUILD in progress** on two parallel tracks. Host **pivoted Azure → GitHub Codespaces** (Azure subscription was SKU-locked — see ADR-007).
+**Status:** ✅ **Slice 0 + 1a DONE** — full stack (Keycloak + Redis + API) running in **GitHub Codespaces**; **auth gate validated end-to-end** (JWT verified, role extracted, forged/missing tokens → 401).
 
-## Parallel build (git worktrees, disjoint file ownership)
-- **Track A — infra** (`track/infra`, this repo dir): `.devcontainer/`, `docker-compose.yml`, `keycloak/`, `app/`, `.env.example`.
-- **Track B — data** (`track/data`, `/Users/benji/code/Vantage-data`): `db/schema.sql`, `scripts/generate_seed.py`, `db/seed.sql` — validating against a local Postgres.
-- Merge both → `main`; run the full stack in a Codespace.
+## Parallel build (worktrees, disjoint files)
+- **Track A — infra/API** (`track/infra`, this dir): devcontainer, docker-compose (db/redis/keycloak/api), Keycloak realm, FastAPI auth gate. **Running.**
+- **Track B — data** (`track/data`, `/Users/benji/code/Vantage-data`): schema + seed, validating against local Postgres.
+- Next integration: merge Track B so the DB + tools come online.
 
-## Decisions (locked)
-- **[ADR-001](05-Decisions/ADR-001-agent-framework.md)** — simple tool-calling loop, not LangGraph; model-agnostic.
-- **[ADR-002](05-Decisions/ADR-002-rbac-tool-boundary.md)** — RBAC in each tool; Keycloak = source of truth.
-- **[ADR-003](05-Decisions/ADR-003-mcp-server.md)** — custom MCP server, 5 tools, HTTP (stdio fallback).
-- **[ADR-004](05-Decisions/ADR-004-environment.md)** — ~~Azure VM~~ **superseded** ↓
-- **[ADR-005](05-Decisions/ADR-005-seed-data.md)** — committed static seed, Faker + Claude.
-- **[ADR-006](05-Decisions/ADR-006-memory-split.md)** — Redis for session; Postgres for the record.
-- **[ADR-007](05-Decisions/ADR-007-environment-codespaces.md)** — **GitHub Codespaces** (docker-in-docker); portable stack unchanged.
+## Proven in the Codespace
+- `docker compose up` → Keycloak + Redis + API.
+- `/health` ok; `/ready` green (redis + keycloak).
+- `support` → token → `/whoami` → `{username: support, roles: [support_user]}`. No/tampered token → **401**.
+
+## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security model: [09-Security](09-Security.md)
 
 ## Next 3 moves
-1. **Track A:** author `docker-compose.yml` + Keycloak realm (roles + test users) + API stub — these don't need Docker to *write*. Then create a Codespace on `track/infra` to *run/test* (Keycloak first).
-2. **Track B:** finish `schema.sql` + seed, validated against local Postgres.
-3. **Merge** both tracks → `main`; full `docker compose up` in the Codespace.
+1. **Merge Track B (data)** → `db/schema.sql` + `db/seed.sql` into the running stack (Postgres init).
+2. **Build the 5 tools** (`get_customer_profile`, `get_open_issues`, `summarise_issue_history`, `update_issue`, `create`/`update_next_action`) — each RBAC-checked (T2), parameterised SQL (T3), exposed via the MCP server.
+3. **Agent loop** (Claude tool-calling) wiring the tools, behind the auth gate.
 
-## Open questions / blockers
-- Azure SKU/quota-increase request — *optional, parallel*. If it clears before the 2nd, the same portable stack can move to Azure for the demo. Not blocking.
-- Demo-day rehearsal on Codespaces (set a long idle timeout; keep a screen-recording fallback).
-- Role mapping (sales→`sales_user`, support→`support_user`, operations→`admin`) — assumption to confirm.
-
----
-> [!TIP] Vault conventions
-> Standard relative Markdown links, not wiki-links (renders on GitHub too). Frontmatter `type` groups notes. GitHub-compatible callouts (`NOTE`/`TIP`/`WARNING`/`IMPORTANT`).
+## Open questions
+- Track B status — coordinate the merge (it owns `db/`, `scripts/`).
+- Demo-day rehearsal on Codespaces (idle timeout 90m set; screen-recording fallback).
