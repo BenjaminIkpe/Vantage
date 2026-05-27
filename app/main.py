@@ -6,9 +6,8 @@ import redis as redis_lib
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from auth import Principal, verify_token
+from auth import Authed, Principal, authed, verify_token
 from agent import run_agent
-from tools import get_customer_profile
 
 app = FastAPI(title="Vantage API")
 
@@ -47,20 +46,18 @@ def whoami(principal: Principal = Depends(verify_token)):
     return {"username": principal.username, "roles": principal.roles}
 
 
-@app.get("/customers")
-def customer_lookup(name: str, principal: Principal = Depends(verify_token)):
-    """Direct customer lookup (any authenticated role). The agent calls the same tool."""
-    return get_customer_profile(name, principal)
-
-
 class AskRequest(BaseModel):
     query: str
 
 
 @app.post("/ask")
-def ask(req: AskRequest, principal: Principal = Depends(verify_token)):
-    """Ask the agent. It reasons over the tools (RBAC-gated) and answers from the data."""
+async def ask(req: AskRequest, caller: Authed = Depends(authed)):
+    """Ask the agent. It reasons over the MCP tools (RBAC-gated) and answers from the data.
+
+    The verified token is forwarded to the MCP server, which re-verifies it and enforces RBAC
+    inside each tool (ADR-002/003). The API itself holds no database access.
+    """
     try:
-        return run_agent(req.query, principal)
+        return await run_agent(req.query, token=caller.token, principal=caller.principal)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"agent error: {exc}")
