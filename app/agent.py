@@ -46,8 +46,13 @@ def _payload(result) -> dict:
     return {}
 
 
-async def run_agent(query: str, token: str, principal: Principal, max_steps: int = MAX_STEPS) -> dict:
-    """Run the tool-calling loop for one query against the MCP server; return {"answer","trace"}."""
+async def run_agent(query: str, token: str, principal: Principal,
+                    history: list[dict] | None = None, max_steps: int = MAX_STEPS) -> dict:
+    """Run the tool-calling loop for one query against the MCP server; return {"answer","trace"}.
+
+    `history` is the prior conversation (Anthropic messages) for multi-turn context (story X1);
+    it seeds the message list so follow-ups like "summarise the second one" resolve.
+    """
     trace: list[dict] = []
     async with streamablehttp_client(MCP_URL, headers={"Authorization": f"Bearer {token}"}) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -57,7 +62,7 @@ async def run_agent(query: str, token: str, principal: Principal, max_steps: int
                 {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema}
                 for t in (await session.list_tools()).tools
             ]
-            messages: list[dict] = [{"role": "user", "content": query}]
+            messages: list[dict] = [*(history or []), {"role": "user", "content": query}]
 
             for _ in range(max_steps):
                 resp = await aclient().messages.create(

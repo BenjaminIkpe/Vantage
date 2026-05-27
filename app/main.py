@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from auth import Authed, Principal, authed, verify_token
 from agent import run_agent
+from session import load_history, resolve_session_id, save_turn
 
 app = FastAPI(title="Vantage API")
 
@@ -48,6 +49,7 @@ def whoami(principal: Principal = Depends(verify_token)):
 
 class AskRequest(BaseModel):
     query: str
+    session_id: str | None = None  # omit to start a session; resend the returned id to continue
 
 
 @app.post("/ask")
@@ -55,9 +57,16 @@ async def ask(req: AskRequest, caller: Authed = Depends(authed)):
     """Ask the agent. It reasons over the MCP tools (RBAC-gated) and answers from the data.
 
     The verified token is forwarded to the MCP server, which re-verifies it and enforces RBAC
-    inside each tool (ADR-002/003). The API itself holds no database access.
+    inside each tool (ADR-002/003). The API itself holds no database access. Conversation
+    context for the session is loaded from / saved to Redis (story X1), so follow-ups resolve.
     """
+    session_id = resolve_session_id(req.session_id)
     try:
-        return await run_agent(req.query, token=caller.token, principal=caller.principal)
+        result = await run_agent(
+            req.query, token=caller.token, principal=caller.principal,
+            history=load_history(session_id),
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"agent error: {exc}")
+    save_turn(session_id, req.query, result["answer"])
+    return {**result, "session_id": session_id}
