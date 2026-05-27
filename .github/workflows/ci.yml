@@ -1,0 +1,28 @@
+name: ci
+
+# General gate: runs on EVERY pull request into main (any source branch) and on
+# pushes to main — path-agnostic, so it's safe to make a *required* status check
+# (it always runs, unlike the path-filtered data-ci, so it can't deadlock a PR).
+# Fast checks now; the tool tests + eval run land here as the app grows.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate docker-compose
+        run: docker compose config --quiet
+      - name: Install API deps
+        run: pip install -r app/requirements.txt
+      - name: Import + syntax check
+        run: |
+          (cd app && python -c "import main")
+          python -m py_compile scripts/*.py
