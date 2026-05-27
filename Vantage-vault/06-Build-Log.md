@@ -15,13 +15,14 @@ updated: 2026-05-27
 - [x] **Slice 1a** — auth gate (JWT verify; forged/missing → 401). ✅
 - [x] **Integration** — full stack on `main`; seed loads (12/40/132/14). ✅
 - [x] **Slice 1b** — first tool (`get_customer_profile`) **+ agent loop** (`POST /ask`, Claude tool-calling); validated found/ambiguous/not-found. ✅
-- [~] **Slice 2** — read tools `get_open_issues`, `summarise_issue_history` ✅ (PR #4); **custom MCP server** (HTTP) so the agent consumes tools via MCP — *next* (the brief's MCP Must).
+- [x] **Slice 2** — read tools `get_open_issues`, `summarise_issue_history` (PR #4); **custom MCP server** (Streamable HTTP) + agent flipped to an **MCP client** (PR #5, #6). MCP Must met; API holds no DB access. ✅
 - [ ] **Slice 3** — write tools (`update_issue`, `create`/`update_next_action`) + RBAC **denial** case + Redis session memory.
 - [ ] **Slice 4** — Customer Escalation Summary Skill.
 - [ ] **Slice 5** — evals (5–10) + observability; minimal UI.
 
 ## Progress log (newest first)
 ### 2026-05-27 (cont.)
+- ✅ **MCP wired (Slice 2 done)** — custom **MCP server** over Streamable HTTP as its own Compose service (PR #5), then the agent flipped to an **MCP client** that discovers + calls tools (PR #6). Role threaded by **forwarding the Keycloak JWT and re-verifying it at the MCP boundary** (SDK `TokenVerifier`; the bearer middleware 401s a bad token before any tool runs); used the SDK's native resource-server support after a quick introspection spike confirmed the subclassed token survives to the tool. DB access removed from the API (`db.py`/`tools.py` now live in `mcp_server/`; only `security.py` shared). Dir is `mcp_server/` to avoid shadowing the `mcp` SDK package. Validated live: 3 headline `/ask` queries via the MCP path + 401 on no token + `smoke_test.py` rejecting a bad token at the MCP server.
 - ✅ **Read tools 2 & 3** — `get_open_issues` + `summarise_issue_history` (PR #4). Shared `_resolve_customer` (get_customer_profile delegates to it — unchanged). Validated end-to-end on the Codespace: the headline query chained all 3 read tools into a grounded escalation summary; E3 zero-open clean; trace returned. (SQL also proven against the committed seed via a throwaway local Postgres while the Codespace was briefly billing-blocked.)
 - ✅ **Agentic core working** — `POST /ask` runs a minimal Claude tool-calling loop (ADR-001) over `get_customer_profile`. Validated live: "Velocity"→grounded profile; "Lumen"→asks which (E2, no guess); "Zzzz"→not found (E1, no invention). Merged via PR #3.
 - ✅ First tool `get_customer_profile` (PR #2); CI on every PR + branch protection live.
@@ -43,3 +44,5 @@ updated: 2026-05-27
 | 2026-05-27 | Auth gate (JWT) | tested valid/missing/tampered tokens | Keycloak issuer mismatch → frontend/backchannel fix |
 | 2026-05-27 | Data-track review + integrate | read schema/generator; ran full stack | realm/seed identity mismatch → reconciled |
 | 2026-05-27 | Tool + agent loop | ran real /ask queries vs seeded data; checked tool trace | validated grounding (no invented data), E1/E2 behaviour, RBAC, lazy client keeps CI green |
+| 2026-05-27 | Read tools 2 & 3 | deep-dived the vault vs the design first; proved SQL on the committed seed (throwaway local PG) then end-to-end on the Codespace | confirmed shared `_resolve_customer` left `get_customer_profile` unchanged; E3 zero-open + headline chain grounded |
+| 2026-05-27 | MCP server + agent-as-client | required a design sketch + sign-off before coding; introspection spike on the MCP SDK to ground the auth approach; smoke test + 3 /ask queries on the Codespace | chose forward-JWT + re-verify (not a trusted role header); renamed dir to avoid SDK package shadowing; 401 path confirmed |

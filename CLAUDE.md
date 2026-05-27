@@ -15,7 +15,7 @@ Vantage is a grounded, **agentic** enterprise assistant for the fictional client
 ## Architecture (one line each — see the ADRs)
 - Agent = a **minimal tool-calling loop** (Claude), not LangGraph (ADR-001); model-agnostic via `app/llm.py` (lazy client).
 - **RBAC enforced inside each tool, never in the prompt** (ADR-002); Keycloak issues roles; the API verifies the JWT.
-- Tools should be exposed via a **custom MCP server** (ADR-003) — *not yet wired; currently in-process*.
+- Tools are exposed via a **custom MCP server** (ADR-003) over Streamable HTTP (`mcp_server/`, compose service `mcp`); the agent is an **MCP client** that discovers + calls them. The forwarded Keycloak JWT is **re-verified at the MCP boundary**; the API holds no DB access.
 - **Codespaces** host (ADR-007 supersedes the Azure ADR-004); the compose stack stays portable.
 - Data: **Postgres** (system of record) + **Redis** (session); seed is committed + Faker/Claude-generated (ADR-005).
 - Security threat model + dev→prod hardening: `Vantage-vault/09-Security.md`.
