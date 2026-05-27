@@ -15,13 +15,14 @@ updated: 2026-05-27
 - [x] **Slice 1a** — auth gate (JWT verify; forged/missing → 401). ✅
 - [x] **Integration** — full stack on `main`; seed loads (12/40/132/14). ✅
 - [x] **Slice 1b** — first tool (`get_customer_profile`) **+ agent loop** (`POST /ask`, Claude tool-calling); validated found/ambiguous/not-found. ✅
-- [ ] **Slice 2** — `get_open_issues`, `summarise_issue_history` + **custom MCP server** (HTTP); agent consumes tools via MCP (the brief's MCP Must).
+- [~] **Slice 2** — read tools `get_open_issues`, `summarise_issue_history` ✅ (PR #4); **custom MCP server** (HTTP) so the agent consumes tools via MCP — *next* (the brief's MCP Must).
 - [ ] **Slice 3** — write tools (`update_issue`, `create`/`update_next_action`) + RBAC **denial** case + Redis session memory.
 - [ ] **Slice 4** — Customer Escalation Summary Skill.
 - [ ] **Slice 5** — evals (5–10) + observability; minimal UI.
 
 ## Progress log (newest first)
 ### 2026-05-27 (cont.)
+- ✅ **Read tools 2 & 3** — `get_open_issues` + `summarise_issue_history` (PR #4). Shared `_resolve_customer` (get_customer_profile delegates to it — unchanged). Validated end-to-end on the Codespace: the headline query chained all 3 read tools into a grounded escalation summary; E3 zero-open clean; trace returned. (SQL also proven against the committed seed via a throwaway local Postgres while the Codespace was briefly billing-blocked.)
 - ✅ **Agentic core working** — `POST /ask` runs a minimal Claude tool-calling loop (ADR-001) over `get_customer_profile`. Validated live: "Velocity"→grounded profile; "Lumen"→asks which (E2, no guess); "Zzzz"→not found (E1, no invention). Merged via PR #3.
 - ✅ First tool `get_customer_profile` (PR #2); CI on every PR + branch protection live.
 - ✅ Full stack integrated on `main`; auth gate; host pivot Azure→Codespaces.
