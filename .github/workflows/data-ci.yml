@@ -1,0 +1,63 @@
+name: data-ci
+
+# Gate for the data layer (track/data). Proves the committed SQL actually loads
+# and that the seed still matches its generator + the planted eval scenarios.
+# All the logic lives in the pytest suite (db/tests) so it runs identically
+# locally: `pip install -r db/tests/requirements.txt && pytest db/tests`.
+#
+# Trigger note: a regular `pull_request` workflow runs from the PR's head branch,
+# so this gates PRs into main directly; the `push` trigger also runs it on this
+# branch. Once merged, the copy on main gates every future PR.
+
+on:
+  pull_request:
+    paths:
+      - 'db/**'
+      - 'scripts/**'
+      - '.github/workflows/data-ci.yml'
+  push:
+    branches: [track/data]
+    paths:
+      - 'db/**'
+      - 'scripts/**'
+      - '.github/workflows/data-ci.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vantage
+          POSTGRES_PASSWORD: vantage
+          POSTGRES_DB: vantage
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # psql (loading) and psycopg (queries) both read these.
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: vantage
+      PGPASSWORD: vantage
+      PGDATABASE: vantage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install test + generator deps
+        run: pip install -r db/tests/requirements.txt
+
+      - name: Run data-layer tests
+        run: pytest db/tests -v
