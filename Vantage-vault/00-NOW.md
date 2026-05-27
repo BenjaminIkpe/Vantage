@@ -11,7 +11,7 @@ updated: 2026-05-27
 
 **Project:** Vantage — agentic assistant for *Acme Operations* (B2B payments). EY Applied AI Engineer take-home.
 **Deadline:** 2026-06-02. One-hour panel follows.
-**Status:** ✅ **Skill *authoring* live (Flow 1 endpoints).** Users turn a finished `/ask` session into a reusable skill: `POST /skills/draft-from-session` generalises the conversation (LLM parameterises the inputs, e.g. `{account_name}`; `allowed_tools` = the tools the session used) → `POST /skills` saves it to a volume → `POST /skills/{name}/run` reuses it for any input. Built on the generic **Skill runner** (Slice 4) + the seeded **Escalation Summary** (S2). Prior: all 5 tools + RBAC denial + Redis memory; agent is an MCP client; API holds no DB access; RBAC re-verified at the MCP boundary. **Next: the `/ask` natural-language authoring trigger (Flow 1 PR B), then evals + observability + UI + deliverables.**
+**Status:** ✅✅ **All brief Musts done + the graded deliverables.** Auth/RBAC (+denial), 5 tools via a custom MCP server, dynamic agent (MCP client), API, Postgres seed, Redis multi-turn memory, the reusable Escalation Summary Skill, Docker one-command — **plus** the **eval set (10/10)**, **observability** (trace + per-tool/total latency + write audit logs), and a full **README + diagram + AI-usage notes**. Beyond the Must: users can **author their own Skills** from a finished session (Flow 1 endpoints). **Remaining is all Should/Could:** minimal **UI** (+ chat-history sidebar idea), the `/ask` save-as-skill trigger, Flow 2.
 
 ## Proven (Codespace, `main`)
 - `docker compose up` → db+redis+keycloak+**mcp**+api healthy; seed 12/40/132/14; auth (support/admin) + 401 on bad tokens.
@@ -32,9 +32,11 @@ updated: 2026-05-27
 
 ## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security: [09-Security](09-Security.md)
 
-## Next moves (via PR flow)
-1. **Skill authoring — Flow 1 PR B (`/ask` trigger):** in `/ask`, "save this as a skill" → the agent composes the skill from the session and, on confirm, persists it via a local `save_skill` tool (the conversational counterpart to the endpoints). (Flow 2 — interview + role-aware suggestions — remains the stretch, ideally with the UI.)
-2. **Evals** (5–10, table in 07-Evals — derive from the proven scenarios) + **observability** write-up (trace + audit logs already emitted) → minimal **UI** → README/diagram/AI-usage deliverables.
+## Next moves (all Should/Could — Musts are done)
+1. **Minimal chat UI** (Should) — the live-demo multiplier. Include the **chat-history sidebar** (list past chats, resume from one) once core chat works; needs per-user session listing (track session ids per user). *Sketch the UI for sign-off when we start.*
+2. **`/ask` "save this as a skill" trigger** (Should, Flow 1 PR B) — conversational counterpart to the authoring endpoints (local `save_skill` tool in the loop).
+3. **Flow 2** (Could) — guided/interview skill authoring with role-aware suggestions.
+4. Polish: bonus tracing (OpenTelemetry/Phoenix), streaming, cache-aside for `get_customer_profile`.
 
 ## Open questions
 - `/ask` save-skill trigger: give the agent a local `save_skill` tool (clean, agentic) vs intent-routing in main.py (hacky). Lean local tool — means run_agent must dispatch local tools alongside MCP tools (only on the /ask path, not skill runs).
