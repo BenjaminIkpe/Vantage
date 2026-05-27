@@ -1,7 +1,7 @@
 ---
 title: ADR-004 — Dev & demo environment: Azure VM, portable compose stack
 type: adr
-status: accepted
+status: superseded by ADR-007
 date: 2026-05-27
 revisit-by:
 supersedes:
@@ -9,7 +9,10 @@ supersedes:
 
 # ADR-004 — Dev & demo environment: an Azure VM running a host-agnostic Docker Compose stack
 
-**Status:** accepted
+> [!WARNING] Superseded by [ADR-007](ADR-007-environment-codespaces.md)
+> The Azure subscription was SKU-locked (new-subscription restriction) — VM creation failed across all regions/sizes. Host pivoted to GitHub Codespaces. The *portability* principle below still holds and is why the pivot was painless.
+
+**Status:** superseded by ADR-007
 **Date:** 2026-05-27
 
 ## Context

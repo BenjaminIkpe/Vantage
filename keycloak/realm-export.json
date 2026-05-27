@@ -1,0 +1,53 @@
+{
+  "realm": "vantage",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      { "name": "sales_user", "description": "Read-only: customers + issues" },
+      { "name": "support_user", "description": "Read + update issues" },
+      { "name": "admin", "description": "Full access incl. next actions" }
+    ]
+  },
+  "users": [
+    {
+      "username": "sales",
+      "enabled": true,
+      "email": "sales@acme.test",
+      "firstName": "Sasha",
+      "lastName": "Sales",
+      "credentials": [{ "type": "password", "value": "sales", "temporary": false }],
+      "realmRoles": ["sales_user"]
+    },
+    {
+      "username": "support",
+      "enabled": true,
+      "email": "support@acme.test",
+      "firstName": "Sam",
+      "lastName": "Support",
+      "credentials": [{ "type": "password", "value": "support", "temporary": false }],
+      "realmRoles": ["support_user"]
+    },
+    {
+      "username": "admin-user",
+      "enabled": true,
+      "email": "ops@acme.test",
+      "firstName": "Avery",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
+      "realmRoles": ["admin"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "vantage-api",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "vantage-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["*"],
+      "webOrigins": ["*"]
+    }
+  ]
+}
