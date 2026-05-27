@@ -24,6 +24,23 @@ def verify_token(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> Prin
         )
 
 
+class Authed:
+    """A verified caller plus the raw token, so the API can forward it to the MCP server."""
+
+    def __init__(self, principal: Principal, token: str):
+        self.principal = principal
+        self.token = token
+
+
+def authed(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> Authed:
+    """Gate the request (verify the token) and hand back the token to forward downstream.
+
+    The API verifies here to fail fast (don't run the agent for an unauthenticated caller);
+    the MCP server re-verifies the forwarded token at the tool boundary (ADR-002/003).
+    """
+    return Authed(verify_token(creds), creds.credentials)
+
+
 def require_role(*allowed: str):
     """Dependency factory: allow only callers holding one of `allowed` realm roles (T2)."""
 

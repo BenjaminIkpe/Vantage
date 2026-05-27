@@ -71,15 +71,16 @@ services:
       KEYCLOAK_REALM: vantage
       KEYCLOAK_CLIENT_ID: vantage-api
       REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgresql://vantage:changeme@db:5432/vantage
+      MCP_URL: http://mcp:8001/mcp          # the agent reaches tools only via the MCP server
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_MODEL: claude-sonnet-4-6
+    # No DATABASE_URL: the API holds no database access — tools run behind the MCP server (ADR-003).
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
       keycloak:
+        condition: service_started
+      mcp:
         condition: service_started
     ports:
       - "8000:8000"
