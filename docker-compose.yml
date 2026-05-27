@@ -34,6 +34,8 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
       - "8080:8080"
     volumes:
@@ -43,6 +45,7 @@ services:
     build: ./app
     environment:
       KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/vantage
       KEYCLOAK_REALM: vantage
       KEYCLOAK_CLIENT_ID: vantage-api
       REDIS_URL: redis://redis:6379/0

@@ -6,10 +6,13 @@ from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")
+KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")  # internal (JWKS/backchannel)
 REALM = os.getenv("KEYCLOAK_REALM", "vantage")
-ISSUER = f"{KEYCLOAK_URL}/realms/{REALM}"
-JWKS_URL = f"{ISSUER}/protocol/openid-connect/certs"
+# Tokens carry Keycloak's *public* hostname in `iss` (KC_HOSTNAME); keys are fetched on the
+# *internal* URL. Verifying against the right issuer while fetching keys internally is the
+# Keycloak frontend/backchannel split (same as running it behind a reverse proxy).
+ISSUER = os.getenv("KEYCLOAK_ISSUER", f"{KEYCLOAK_URL}/realms/{REALM}")
+JWKS_URL = f"{KEYCLOAK_URL}/realms/{REALM}/protocol/openid-connect/certs"
 
 # PyJWKClient caches Keycloak's signing keys (fetched lazily on first verify).
 _jwks_client = PyJWKClient(JWKS_URL)
