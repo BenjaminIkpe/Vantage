@@ -49,7 +49,10 @@ services:
       KEYCLOAK_REALM: vantage
       KEYCLOAK_CLIENT_ID: vantage-api
       REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://vantage:changeme@db:5432/vantage
     depends_on:
+      db:
+        condition: service_healthy
       redis:
         condition: service_healthy
       keycloak:

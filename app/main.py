@@ -6,6 +6,7 @@ import redis as redis_lib
 from fastapi import Depends, FastAPI
 
 from auth import Principal, verify_token
+from tools import get_customer_profile
 
 app = FastAPI(title="Vantage API")
 
@@ -42,3 +43,12 @@ def ready():
 def whoami(principal: Principal = Depends(verify_token)):
     """Proves end-to-end JWT verification + role extraction (T1/T2). Needs a valid token."""
     return {"username": principal.username, "roles": principal.roles}
+
+
+@app.get("/customers")
+def customer_lookup(name: str, principal: Principal = Depends(verify_token)):
+    """Look up a customer by name — any authenticated role (read). Proves tool + DB + RBAC.
+
+    Direct endpoint for now; the agent loop will call the same tool in the next slice.
+    """
+    return get_customer_profile(name, principal)
