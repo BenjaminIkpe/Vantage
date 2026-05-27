@@ -39,5 +39,20 @@ services:
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
 
+  api:
+    build: ./app
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: vantage
+      KEYCLOAK_CLIENT_ID: vantage-api
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
 volumes:
   pgdata:
