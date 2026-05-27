@@ -30,4 +30,4 @@ jobs:
           # Import the MCP server from its own dir so the repo root isn't on sys.path
           # (the SDK's top-level package is `mcp`; our dir is mcp_server/ to avoid shadowing).
           (cd mcp_server && PYTHONPATH="$GITHUB_WORKSPACE/app" python -c "import server")
-          python -m py_compile scripts/*.py
+          python -m py_compile scripts/*.py eval/*.py
