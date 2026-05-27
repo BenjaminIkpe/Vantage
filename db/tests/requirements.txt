@@ -1,0 +1,8 @@
+# Dev/CI deps for the data-layer test suite (db/tests). Not a runtime dependency
+# of the app or the database — the seed itself is plain SQL.
+#
+# faker is pinned: its output is version-stable, so test_seed_matches_generator
+# only holds against this exact version. Bump it and regenerate the seed together.
+faker==40.19.1
+pytest>=8,<9
+psycopg[binary]>=3.1,<4

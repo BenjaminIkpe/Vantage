@@ -2,10 +2,12 @@ name: data-ci
 
 # Gate for the data layer (track/data). Proves the committed SQL actually loads
 # and that the seed still matches its generator + the planted eval scenarios.
+# All the logic lives in the pytest suite (db/tests) so it runs identically
+# locally: `pip install -r db/tests/requirements.txt && pytest db/tests`.
 #
-# Trigger note: `pull_request` checks run from the BASE branch's workflow, so this
-# file only gates PRs *after* it has merged to main. The `push` trigger runs it on
-# this branch directly, so the bootstrapping PR still gets a real green check.
+# Trigger note: a regular `pull_request` workflow runs from the PR's head branch,
+# so this gates PRs into main directly; the `push` trigger also runs it on this
+# branch. Once merged, the copy on main gates every future PR.
 
 on:
   pull_request:
@@ -40,6 +42,7 @@ jobs:
           --health-retries 5
 
     env:
+      # psql (loading) and psycopg (queries) both read these.
       PGHOST: localhost
       PGPORT: '5432'
       PGUSER: vantage
@@ -53,110 +56,8 @@ jobs:
         with:
           python-version: '3.13'
 
-      # Pinned so the byte-identical check below is meaningful: Faker output is
-      # stable for a given version. Bump here and regenerate the seed together.
-      - name: Install generator deps
-        run: pip install 'faker==40.19.1'
+      - name: Install test + generator deps
+        run: pip install -r db/tests/requirements.txt
 
-      - name: Compile the generator
-        run: python -m py_compile scripts/generate_seed.py
-
-      - name: Seed is in sync with its generator (no hand-edits, no stale seed)
-        run: |
-          python scripts/generate_seed.py
-          if ! git diff --exit-code -- db/seed.sql; then
-            echo "::error::db/seed.sql is out of date — re-run scripts/generate_seed.py and commit the result."
-            exit 1
-          fi
-
-      - name: Load schema, then seed
-        run: |
-          psql -v ON_ERROR_STOP=1 -f db/schema.sql
-          psql -v ON_ERROR_STOP=1 -f db/seed.sql
-
-      - name: Assert integrity + planted eval scenarios
-        run: |
-          psql -v ON_ERROR_STOP=1 <<'SQL'
-          DO $$
-          DECLARE
-            v_customers int; v_issues int; v_updates int; v_actions int;
-            v_open_velocity int; v_crit_velocity int;
-          BEGIN
-            -- Every role represented (one user per role) so RBAC + attribution work.
-            IF (SELECT count(*) FROM users WHERE role = 'sales_user')   < 1
-            OR (SELECT count(*) FROM users WHERE role = 'support_user') < 1
-            OR (SELECT count(*) FROM users WHERE role = 'admin')        < 1 THEN
-              RAISE EXCEPTION 'users: each role (sales_user/support_user/admin) must be present';
-            END IF;
-
-            -- Volume within the brief targets (with slack; exact counts are tuning).
-            SELECT count(*) INTO v_customers FROM customers;
-            SELECT count(*) INTO v_issues    FROM issues;
-            SELECT count(*) INTO v_updates   FROM issue_updates;
-            SELECT count(*) INTO v_actions   FROM next_actions;
-            IF v_customers NOT BETWEEN 10 AND 14  THEN RAISE EXCEPTION 'customers out of range: %', v_customers; END IF;
-            IF v_issues    NOT BETWEEN 35 AND 45  THEN RAISE EXCEPTION 'issues out of range: %', v_issues; END IF;
-            IF v_updates   NOT BETWEEN 100 AND 160 THEN RAISE EXCEPTION 'issue_updates out of range: %', v_updates; END IF;
-            IF v_actions   NOT BETWEEN 10 AND 20  THEN RAISE EXCEPTION 'next_actions out of range: %', v_actions; END IF;
-
-            -- E1: the deliberately-absent customer names must not exist.
-            IF EXISTS (SELECT 1 FROM customers WHERE name ILIKE '%Zzzz%' OR name ILIKE '%Globex%') THEN
-              RAISE EXCEPTION 'E1 violated: an absent customer name is present';
-            END IF;
-
-            -- E2: near-identical twins, separable by account_ref.
-            IF (SELECT count(DISTINCT account_ref) FROM customers WHERE name ILIKE 'Lumen Commerce%') < 2 THEN
-              RAISE EXCEPTION 'E2 violated: need at least two Lumen Commerce twins with distinct account_ref';
-            END IF;
-
-            -- E3: a real customer that has issues but none open.
-            IF NOT EXISTS (
-              SELECT 1 FROM customers c
-              WHERE c.name = 'Calm Waters Subscriptions'
-                AND EXISTS (SELECT 1 FROM issues i WHERE i.customer_id = c.id)
-                AND NOT EXISTS (SELECT 1 FROM issues i
-                                WHERE i.customer_id = c.id
-                                  AND i.status IN ('open', 'in_progress', 'pending'))
-            ) THEN
-              RAISE EXCEPTION 'E3 violated: Calm Waters Subscriptions must have issues but zero open';
-            END IF;
-
-            -- HERO: Velocity Marketplace is clearly High/Critical.
-            SELECT count(*) FILTER (WHERE i.status IN ('open', 'in_progress', 'pending')),
-                   count(*) FILTER (WHERE i.status IN ('open', 'in_progress', 'pending')
-                                      AND i.priority = 'critical')
-              INTO v_open_velocity, v_crit_velocity
-            FROM issues i JOIN customers c ON c.id = i.customer_id
-            WHERE c.name = 'Velocity Marketplace';
-            IF v_crit_velocity < 1 OR v_open_velocity < 3 THEN
-              RAISE EXCEPTION 'HERO violated: Velocity needs >=1 critical open and >=3 open (got % crit / % open)',
-                v_crit_velocity, v_open_velocity;
-            END IF;
-
-            -- Chronology + history integrity.
-            IF EXISTS (SELECT 1 FROM issue_updates u JOIN issues i ON i.id = u.issue_id
-                       WHERE u.created_at < i.created_at) THEN
-              RAISE EXCEPTION 'chronology: an update predates its issue';
-            END IF;
-            IF EXISTS (SELECT 1 FROM issues WHERE updated_at < created_at) THEN
-              RAISE EXCEPTION 'chronology: issue.updated_at < created_at';
-            END IF;
-            IF EXISTS (SELECT 1 FROM issues i
-                       WHERE NOT EXISTS (SELECT 1 FROM issue_updates u WHERE u.issue_id = i.id)) THEN
-              RAISE EXCEPTION 'history: an issue has no updates';
-            END IF;
-            IF EXISTS (SELECT 1 FROM issues WHERE created_at > now() OR updated_at > now())
-            OR EXISTS (SELECT 1 FROM issue_updates WHERE created_at > now()) THEN
-              RAISE EXCEPTION 'chronology: a future timestamp exists';
-            END IF;
-
-            -- next_actions are admin-owned (RBAC boundary, ADR-002).
-            IF EXISTS (SELECT 1 FROM next_actions na JOIN users u ON u.id = na.created_by_id
-                       WHERE u.role <> 'admin') THEN
-              RAISE EXCEPTION 'next_actions: created_by must be an admin';
-            END IF;
-
-            RAISE NOTICE 'data-layer assertions passed: % customers, % issues, % updates, % next_actions.',
-              v_customers, v_issues, v_updates, v_actions;
-          END $$;
-          SQL
+      - name: Run data-layer tests
+        run: pytest db/tests -v
