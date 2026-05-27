@@ -50,6 +50,8 @@ services:
       KEYCLOAK_CLIENT_ID: vantage-api
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql://vantage:changeme@db:5432/vantage
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: claude-sonnet-4-6
     depends_on:
       db:
         condition: service_healthy

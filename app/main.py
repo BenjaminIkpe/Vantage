@@ -3,9 +3,11 @@ import os
 
 import httpx
 import redis as redis_lib
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel
 
 from auth import Principal, verify_token
+from agent import run_agent
 from tools import get_customer_profile
 
 app = FastAPI(title="Vantage API")
@@ -41,14 +43,24 @@ def ready():
 
 @app.get("/whoami")
 def whoami(principal: Principal = Depends(verify_token)):
-    """Proves end-to-end JWT verification + role extraction (T1/T2). Needs a valid token."""
+    """Proves JWT verification + role extraction (T1/T2)."""
     return {"username": principal.username, "roles": principal.roles}
 
 
 @app.get("/customers")
 def customer_lookup(name: str, principal: Principal = Depends(verify_token)):
-    """Look up a customer by name — any authenticated role (read). Proves tool + DB + RBAC.
-
-    Direct endpoint for now; the agent loop will call the same tool in the next slice.
-    """
+    """Direct customer lookup (any authenticated role). The agent calls the same tool."""
     return get_customer_profile(name, principal)
+
+
+class AskRequest(BaseModel):
+    query: str
+
+
+@app.post("/ask")
+def ask(req: AskRequest, principal: Principal = Depends(verify_token)):
+    """Ask the agent. It reasons over the tools (RBAC-gated) and answers from the data."""
+    try:
+        return run_agent(req.query, principal)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"agent error: {exc}")
