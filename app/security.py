@@ -26,11 +26,16 @@ _jwks_client = PyJWKClient(JWKS_URL)
 
 
 class Principal:
-    """The verified caller: identity + realm roles (the source of truth for RBAC)."""
+    """The verified caller: identity + realm roles (the source of truth for RBAC).
 
-    def __init__(self, username: str, roles: list[str]):
+    `subject` is the token `sub` (Keycloak user id), used to attribute writes to the acting
+    user via users.keycloak_id (ADR-002 attribution; see mcp_server/tools.py).
+    """
+
+    def __init__(self, username: str, roles: list[str], subject: str | None = None):
         self.username = username
         self.roles = roles
+        self.subject = subject
 
 
 def verify_access_token(token: str) -> Principal:
@@ -53,4 +58,4 @@ def verify_access_token(token: str) -> Principal:
     )
     username = claims.get("preferred_username") or claims.get("sub", "unknown")
     roles = claims.get("realm_access", {}).get("roles", [])
-    return Principal(username=username, roles=roles)
+    return Principal(username=username, roles=roles, subject=claims.get("sub"))
