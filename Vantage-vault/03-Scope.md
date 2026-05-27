@@ -26,9 +26,12 @@ updated: 2026-05-27
 
 ## Should — clear value, do once Must is green
 - [ ] **Minimal chat UI** — makes the live demo far stronger than curling an API. Kept deliberately simple; gracefully droppable to API + a demo script if time runs short.
+  - **Chat-history sidebar (resume previous chats)** — a left rail listing the user's past conversations, click to pick up where they left off (like ChatGPT/Claude/etc.). Leverages our Redis session memory; needs per-user session listing (track session ids per user, since `session:{id}` is keyed by id alone today). Revisit when we build the UI.
+- [ ] **Skill authoring via chat — the `/ask` "save this as a skill" trigger** (Flow 1 PR B). The authoring *endpoints* (`draft-from-session` + save) are **built** (PR #10); this is the conversational counterpart — in `/ask`, the agent composes the skill from the session and persists it via a local `save_skill` tool on confirm. Deferred to a Should so we lock the graded deliverables first.
 
 ## Could — nice-to-have, only if ahead
 - [ ] Bonus tracing — OpenTelemetry / LangSmith / Arize Phoenix (stated bonus in the brief).
+- [ ] **Flow 2 — guided Skill authoring** (interview + role-aware suggestions): the app asks what the skill should do and suggests options based on the user's role. The stretch beyond Flow 1, best with the UI.
 - [ ] Second Redis use — caching customer lookups.
 - [ ] Streaming responses (demo polish).
 - [ ] Cross-account oversight listing tool for `admin` (e.g. "all high-risk accounts").
