@@ -273,3 +273,221 @@ def update_next_action(next_action_id: int, principal: Principal,
         (status, description, due_date, next_action_id),
     )
     return {"status": "updated", "next_action": written[0]}
+
+
+# --- browse / list tools (read; allowed for every authenticated role) ----------------
+# Paginated cross-record listings with optional filters. Every parameter is bound via
+# psycopg (T3); the WHERE clause is composed from filter presence, not string-built.
+# Default sort orders are encoded server-side so the agent doesn't have to specify them.
+
+_PAGE_DEFAULT = 20
+_PAGE_MAX = 100
+
+
+def _page(limit: int | None, offset: int | None) -> tuple[int, int]:
+    """Clamp pagination to sane bounds."""
+    lim = max(1, min(int(limit or _PAGE_DEFAULT), _PAGE_MAX))
+    off = max(0, int(offset or 0))
+    return lim, off
+
+
+def _count(sql: str, params: tuple) -> int:
+    """Run a `SELECT count(*) AS n …` and return the integer (0 if no rows)."""
+    rows = query(sql, params)
+    return int(rows[0]["n"]) if rows else 0
+
+
+def list_customers(principal: Principal,
+                   q: str | None = None,
+                   region: str | None = None,
+                   segment: str | None = None,
+                   tier: str | None = None,
+                   account_manager: str | None = None,
+                   limit: int = _PAGE_DEFAULT,
+                   offset: int = 0) -> dict:
+    """List customers with optional filters; paginated.
+
+    Use for browse/explore queries where the user doesn't name a specific customer (e.g.
+    'who are our customers', 'show me Enterprise', 'Scotland accounts', 'my portfolio').
+    `q` is a partial-name OR account_ref match (ILIKE %q%); other filters are exact-equals.
+    `account_manager` is a partial display-name match against users.display_name. Returns
+    `{customers, total_count, limit, offset, has_more}`, sorted by name asc.
+    """
+    lim, off = _page(limit, offset)
+    conds: list[str] = []
+    params: list = []
+    if q:
+        conds.append("(c.name ILIKE %s OR c.account_ref ILIKE %s)")
+        params += [f"%{q}%", f"%{q}%"]
+    if region:
+        conds.append("c.region = %s")
+        params.append(region)
+    if segment:
+        conds.append("c.segment = %s")
+        params.append(segment)
+    if tier:
+        conds.append("c.tier = %s")
+        params.append(tier)
+    if account_manager:
+        conds.append("u.display_name ILIKE %s")
+        params.append(f"%{account_manager}%")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+    total = _count(
+        f"""SELECT count(*) AS n FROM customers c
+            LEFT JOIN users u ON u.id = c.account_manager_id
+            {where}""",
+        tuple(params),
+    )
+    rows = query(
+        f"""SELECT c.id, c.name, c.account_ref, c.region, c.postcode, c.segment, c.tier,
+                   u.display_name AS account_manager
+            FROM customers c
+            LEFT JOIN users u ON u.id = c.account_manager_id
+            {where}
+            ORDER BY c.name ASC
+            LIMIT %s OFFSET %s""",
+        tuple(params + [lim, off]),
+    )
+    return {
+        "status": "ok",
+        "customers": rows,
+        "total_count": total,
+        "limit": lim, "offset": off,
+        "has_more": off + len(rows) < total,
+    }
+
+
+def list_issues(principal: Principal,
+                status: str | None = None,
+                priority: str | None = None,
+                category: str | None = None,
+                customer: str | None = None,
+                assigned_to: str | None = None,
+                limit: int = _PAGE_DEFAULT,
+                offset: int = 0) -> dict:
+    """List issues across customers with optional filters; paginated.
+
+    Use for cross-customer triage and exploration (e.g. 'all critical open issues', 'my
+    open issues', 'integration backlog'). `status='open'` is a convenience that returns
+    every open-bucket value (open / in_progress / pending). Sorted critical→low, then
+    oldest-first. `customer` and `assigned_to` are partial-name matches.
+    """
+    lim, off = _page(limit, offset)
+    conds: list[str] = []
+    params: list = []
+    if status == "open":
+        conds.append("i.status = ANY(%s)")
+        params.append(OPEN_STATUSES)
+    elif status:
+        conds.append("i.status = %s")
+        params.append(status)
+    if priority:
+        conds.append("i.priority = %s")
+        params.append(priority)
+    if category:
+        conds.append("i.category = %s")
+        params.append(category)
+    if customer:
+        conds.append("c.name ILIKE %s")
+        params.append(f"%{customer}%")
+    if assigned_to:
+        conds.append("u.display_name ILIKE %s")
+        params.append(f"%{assigned_to}%")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+    total = _count(
+        f"""SELECT count(*) AS n FROM issues i
+            JOIN customers c ON c.id = i.customer_id
+            LEFT JOIN users u ON u.id = i.assigned_to
+            {where}""",
+        tuple(params),
+    )
+    rows = query(
+        f"""SELECT i.id, i.title, i.category, i.status, i.priority,
+                   i.created_at, i.updated_at,
+                   c.id AS customer_id, c.name AS customer_name, c.account_ref,
+                   u.display_name AS assigned_to
+            FROM issues i
+            JOIN customers c ON c.id = i.customer_id
+            LEFT JOIN users u ON u.id = i.assigned_to
+            {where}
+            ORDER BY
+              CASE i.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                              WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END,
+              i.created_at ASC
+            LIMIT %s OFFSET %s""",
+        tuple(params + [lim, off]),
+    )
+    return {
+        "status": "ok",
+        "issues": rows,
+        "total_count": total,
+        "limit": lim, "offset": off,
+        "has_more": off + len(rows) < total,
+    }
+
+
+def list_next_actions(principal: Principal,
+                      status: str | None = None,
+                      overdue: bool = False,
+                      customer: str | None = None,
+                      created_by: str | None = None,
+                      limit: int = _PAGE_DEFAULT,
+                      offset: int = 0) -> dict:
+    """List recorded next actions across issues; paginated.
+
+    Use for admin oversight (e.g. 'overdue next actions', 'open admin work', 'what's
+    Dana created'). `overdue=true` returns open items whose due_date is in the past.
+    Sorted by status (open first) then due_date asc (nulls last).
+    """
+    lim, off = _page(limit, offset)
+    conds: list[str] = []
+    params: list = []
+    if overdue:
+        conds.append("na.status = 'open' AND na.due_date IS NOT NULL AND na.due_date < CURRENT_DATE")
+    elif status:
+        conds.append("na.status = %s")
+        params.append(status)
+    if customer:
+        conds.append("c.name ILIKE %s")
+        params.append(f"%{customer}%")
+    if created_by:
+        conds.append("u.display_name ILIKE %s")
+        params.append(f"%{created_by}%")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+    total = _count(
+        f"""SELECT count(*) AS n FROM next_actions na
+            JOIN issues i ON i.id = na.issue_id
+            JOIN customers c ON c.id = i.customer_id
+            LEFT JOIN users u ON u.id = na.created_by_id
+            {where}""",
+        tuple(params),
+    )
+    rows = query(
+        f"""SELECT na.id, na.issue_id, na.description, na.due_date, na.status,
+                   na.created_at, na.updated_at,
+                   i.title AS issue_title,
+                   c.id AS customer_id, c.name AS customer_name,
+                   u.display_name AS created_by
+            FROM next_actions na
+            JOIN issues i ON i.id = na.issue_id
+            JOIN customers c ON c.id = i.customer_id
+            LEFT JOIN users u ON u.id = na.created_by_id
+            {where}
+            ORDER BY
+              CASE na.status WHEN 'open' THEN 0 WHEN 'cancelled' THEN 1 WHEN 'done' THEN 2 END,
+              COALESCE(na.due_date, '9999-12-31') ASC
+            LIMIT %s OFFSET %s""",
+        tuple(params + [lim, off]),
+    )
+    return {
+        "status": "ok",
+        "next_actions": rows,
+        "total_count": total,
+        "limit": lim, "offset": off,
+        "has_more": off + len(rows) < total,
+    }
+
+

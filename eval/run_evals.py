@@ -115,6 +115,24 @@ CASES = [
         "id": "10-auth-401", "measures": "auth required", "role": "support", "no_auth": True,
         "ask": "Anything.", "expect": {"http": 401},
     },
+    # --- browse / list tools (PR feat/browse-tools) ---
+    {
+        "id": "11-list-customers", "measures": "browse: list_customers for exploration",
+        "role": "sales", "ask": "Who are our customers? Show me a few.",
+        "expect": {"tools": ["list_customers"], "status": {"list_customers": "ok"},
+                   "answer_any": ["velocity", "calm waters", "lumen"]},
+    },
+    {
+        "id": "12-list-issues-critical", "measures": "browse: cross-customer triage by filter",
+        "role": "support", "ask": "Show me all critical open issues across customers.",
+        "expect": {"tools": ["list_issues"], "status": {"list_issues": "ok"},
+                   "answer_any": ["critical"]},
+    },
+    {
+        "id": "13-list-next-actions-overdue", "measures": "admin oversight: overdue directives",
+        "role": "admin", "ask": "What next actions are overdue?",
+        "expect": {"tools": ["list_next_actions"], "status": {"list_next_actions": "ok"}},
+    },
 ]
 
 

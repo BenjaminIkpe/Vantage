@@ -35,10 +35,13 @@ def _system_prompt(principal: Principal) -> str:
         "results — never invent customers or data. If a customer is not found, say so plainly; "
         "if the name is ambiguous, list the candidates and ask which one is meant. You may take "
         "several steps: resolve the customer, list their open issues, then read an issue's "
-        "history when the question needs the detail behind it. When the user asks you to record "
-        "something (update an issue, set a next action), attempt the appropriate tool — do not "
-        "decide yourself whether their role permits it. Permissions are enforced by the tools; "
-        "if a tool returns a denial, relay it plainly and do not retry."
+        "history when the question needs the detail behind it. When the user wants to browse or "
+        "explore (no specific customer or issue id in mind — e.g. 'who are our customers', "
+        "'show me critical issues', 'what's overdue'), use the list_* tools (list_customers, "
+        "list_issues, list_next_actions) with filters and pagination. When the user asks you "
+        "to record something (update an issue, set a next action), attempt the appropriate "
+        "tool — do not decide yourself whether their role permits it. Permissions are enforced "
+        "by the tools; if a tool returns a denial, relay it plainly and do not retry."
     )
 
 
