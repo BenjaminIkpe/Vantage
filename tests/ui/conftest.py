@@ -43,6 +43,27 @@ def signed_in_page(page: Page, request):
     return page
 
 
+@pytest.fixture
+def page_sales(page: Page):
+    from helpers import sign_in_as
+    sign_in_as(page, "sales")
+    return page
+
+
+@pytest.fixture
+def page_support(page: Page):
+    from helpers import sign_in_as
+    sign_in_as(page, "support")
+    return page
+
+
+@pytest.fixture
+def page_admin(page: Page):
+    from helpers import sign_in_as
+    sign_in_as(page, "admin")
+    return page
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "role(name): which seeded role to sign in as for `signed_in_page`"

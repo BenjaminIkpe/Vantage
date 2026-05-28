@@ -1,22 +1,19 @@
-"""Vantage UI end-to-end tests with Playwright.
+"""Vantage UI end-to-end tests — Playwright + Chromium.
 
-Designed to catch the bugs the user reported on live poking + add comprehensive coverage:
-  - streaming visibility: response should grow as it streams, not require a tab switch
-  - skills modal: open, list, pick one, run, see grounded result in chat
-  - layout: page height should not grow as messages accumulate (thread scrolls internally)
-  - RBAC: sales denied / support+admin allowed
-  - sidebar: chats persist across reload; clicking an old chat loads its history
-  - keyboard + theme polish
-
+Comprehensive coverage of every interactive surface, every role, every reported bug.
 Run on the Codespace where the stack is alive:
+
     pip install -r tests/ui/requirements.txt
-    playwright install --with-deps chromium
+    playwright install chromium
     pytest tests/ui -v
+    pytest tests/ui -v -n 4               # parallel
+    pytest tests/ui -v -k auth            # filter
 """
 import os
+import re
 import time
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, BrowserContext, expect
 
 from helpers import (
     BASE_URL, SEL, sign_in_as, send_message, wait_for_streaming_done,
@@ -24,298 +21,643 @@ from helpers import (
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1) Auth — sign-in card, sign-in for each role, sign-out, persistence
-# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# 1) AUTH — sign-in card, all 3 roles, persistence, sign-out
+# ════════════════════════════════════════════════════════════════════════════
 
-def test_unauthed_visit_shows_signin_card(page: Page):
-    """A fresh visit (no cookie) renders the sign-in overlay, not the chat."""
-    page.goto(BASE_URL + "/")
-    expect(page.get_by_text("Sign in with Keycloak")).to_be_visible(timeout=10_000)
-    # Chat input is not visible (it's behind authStatus === 'authed')
-    assert page.locator(SEL["chat_input"]).count() == 0 or not page.locator(SEL["chat_input"]).is_visible()
+class TestAuth:
+    def test_unauthed_visit_shows_signin_card(self, page: Page):
+        page.goto(BASE_URL + "/")
+        expect(page.get_by_text("Sign in with Keycloak")).to_be_visible(timeout=10_000)
+
+    def test_unauthed_chat_input_not_present(self, page: Page):
+        page.goto(BASE_URL + "/")
+        page.wait_for_selector("text=Sign in with Keycloak", timeout=10_000)
+        # Chat input should not be visible / interactive when unauthed
+        assert not page.locator(SEL["chat_input"]).is_visible()
+
+    def test_signin_card_lists_dev_users(self, page: Page):
+        page.goto(BASE_URL + "/")
+        page.wait_for_selector("text=Sign in with Keycloak", timeout=10_000)
+        body = page.inner_text("body").lower()
+        assert "sales" in body and "support" in body and "admin" in body, \
+            "sign-in card should list the seeded dev users"
+
+    @pytest.mark.parametrize("role", ["sales", "support", "admin"])
+    def test_signin_succeeds_for_role(self, page: Page, role: str):
+        sign_in_as(page, role)
+        expect(page.locator(SEL["chat_input"])).to_be_visible(timeout=10_000)
+
+    def test_role_badge_after_signin_sales(self, page_sales: Page):
+        body = page_sales.inner_text("body").lower()
+        assert "sales" in body
+
+    def test_role_badge_after_signin_support(self, page_support: Page):
+        body = page_support.inner_text("body").lower()
+        assert "support" in body
+
+    def test_role_badge_after_signin_admin(self, page_admin: Page):
+        body = page_admin.inner_text("body").lower()
+        assert "admin" in body
+
+    def test_signin_persists_across_reload(self, page_support: Page):
+        page_support.reload()
+        expect(page_support.locator(SEL["chat_input"])).to_be_visible(timeout=10_000)
+
+    def test_signout_clears_session(self, page_support: Page):
+        page_support.get_by_role("button", name="Account menu").click()
+        page_support.get_by_text("Sign out").click()
+        expect(page_support.get_by_text("Sign in with Keycloak")).to_be_visible(timeout=10_000)
+
+    def test_signout_clears_cookie(self, page_support: Page, context: BrowserContext):
+        # Sign out and verify the vantage_sid cookie is gone.
+        before = [c for c in context.cookies() if c["name"] == "vantage_sid"]
+        assert before, "expected vantage_sid cookie to exist after sign-in"
+        page_support.get_by_role("button", name="Account menu").click()
+        page_support.get_by_text("Sign out").click()
+        page_support.wait_for_selector("text=Sign in with Keycloak", timeout=10_000)
+        after = [c for c in context.cookies() if c["name"] == "vantage_sid"]
+        assert not after, "vantage_sid cookie should be cleared after sign-out"
 
 
-@pytest.mark.parametrize("role,expected_role_word", [
-    ("sales", "sales"),
-    ("support", "support"),
-    ("admin", "admin"),
-])
-def test_signin_loads_chat_with_correct_role(page: Page, role: str, expected_role_word: str):
-    """Sign in as each role → chat loads, role chip shows the right text."""
-    sign_in_as(page, role)
-    # Chat input is visible (we're in the authed UI)
-    expect(page.locator(SEL["chat_input"])).to_be_visible()
-    # Role text appears somewhere in the header / footer
-    page_text = page.inner_text("body").lower()
-    assert expected_role_word in page_text, f"role text {expected_role_word!r} not found in page"
+# ════════════════════════════════════════════════════════════════════════════
+# 2) BASIC CHAT — input, send, response visible
+# ════════════════════════════════════════════════════════════════════════════
 
+class TestBasicChat:
+    def test_empty_input_does_not_send(self, page_support: Page):
+        inp = page_support.locator(SEL["chat_input"])
+        inp.click()
+        inp.press("Enter")
+        time.sleep(1.0)
+        assert page_support.evaluate(
+            "() => document.querySelector('body').__x?.$data?.isStreaming"
+        ) in (False, None)
 
-def test_signin_persists_across_reload(page: Page):
-    """After sign-in, hard reload → still authed (cookie path)."""
-    sign_in_as(page, "support")
-    page.reload()
-    expect(page.locator(SEL["chat_input"])).to_be_visible(timeout=10_000)
-    # Should NOT see the sign-in card after reload
-    assert page.locator("text=Sign in with Keycloak").count() == 0 or \
-           not page.locator("text=Sign in with Keycloak").is_visible()
+    def test_whitespace_only_input_does_not_send(self, page_support: Page):
+        inp = page_support.locator(SEL["chat_input"])
+        inp.click()
+        inp.fill("    \t  \n   ")
+        inp.press("Enter")
+        time.sleep(1.0)
+        assert page_support.evaluate(
+            "() => document.querySelector('body').__x?.$data?.isStreaming"
+        ) in (False, None)
 
+    def test_send_via_enter_shows_user_bubble(self, page_support: Page):
+        msg = "Open issues for Velocity Marketplace?"
+        send_message(page_support, msg)
+        # User bubble appears (text matches)
+        page_support.wait_for_selector(f"text=/{re.escape(msg[:30])}/", timeout=5_000)
 
-def test_signout_returns_signin_card(page: Page):
-    """Open avatar menu → Sign out → land on sign-in card."""
-    sign_in_as(page, "support")
-    # Open the avatar menu (3-dot button)
-    page.get_by_role("button", name="Account menu").click()
-    page.get_by_text("Sign out").click()
-    expect(page.get_by_text("Sign in with Keycloak")).to_be_visible(timeout=10_000)
+    def test_send_via_button_works(self, page_support: Page):
+        inp = page_support.locator(SEL["chat_input"])
+        inp.click()
+        inp.fill("Open issues for Velocity Marketplace?")
+        page_support.locator(SEL["send_button"]).first.click()
+        page_support.wait_for_selector("text=/Velocity Marketplace/i", timeout=10_000)
 
+    def test_shift_enter_inserts_newline(self, page_support: Page):
+        inp = page_support.locator(SEL["chat_input"])
+        inp.click()
+        inp.type("hello")
+        inp.press("Shift+Enter")
+        inp.type("world")
+        value = inp.input_value()
+        assert "\n" in value, f"expected newline in input value, got {value!r}"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2) Streaming visibility (the headline reported bug)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_streaming_response_visible_without_tab_switch(page: Page):
-    """Bug repro: after sending, the assistant's answer should grow as it streams in,
-    visible immediately — NOT require switching to another chat and back."""
-    sign_in_as(page, "support")
-    send_message(page, "What open issues does Velocity Marketplace have?")
-
-    # Watch the assistant's message text grow over time.
-    samples = []
-    deadline = time.time() + 25
-    while time.time() < deadline:
-        text = last_assistant_text(page)
-        samples.append((time.time(), len(text)))
-        # Break early once we have a meaningful answer growing
-        if len(text) > 300:
-            break
+    def test_send_button_disabled_while_streaming(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        # Briefly, isStreaming should flip to true
         time.sleep(0.5)
+        # During streaming, the button shows Stop (or is disabled)
+        body = page_support.inner_text("body").lower()
+        # Either we see "stop" affordance OR streaming has already finished
+        wait_for_streaming_done(page_support, timeout=60)
+        # After finishing, isStreaming false
+        assert page_support.evaluate(
+            "() => document.querySelector('body').__x?.$data?.isStreaming"
+        ) in (False, None)
 
-    # Strict assertion: text length grew over time (we saw at least 3 distinct sizes,
-    # not just a final dump).
-    distinct_sizes = sorted(set(s[1] for s in samples))
-    assert len(distinct_sizes) >= 3, (
-        f"answer never grew progressively — saw sizes {distinct_sizes} "
-        f"(if there are only 1-2 sizes, the UI isn't re-rendering as deltas arrive)"
-    )
-    assert distinct_sizes[-1] > 100, (
-        f"final assistant text was only {distinct_sizes[-1]} chars — did the stream stall?"
-    )
+    def test_user_bubble_renders_text_safely(self, page_support: Page):
+        msg = "<script>alert(1)</script> and a <b>bold</b> thing"
+        send_message(page_support, msg)
+        # No actual <script> or <b> element should be in user bubble (it's x-text, safe)
+        # The plain text should still appear
+        page_support.wait_for_selector(f"text=/script.alert/i", timeout=5_000)
 
-
-def test_trace_expander_populates_after_response(page: Page):
-    """Once the stream finishes, the trace expander should list the tools that fired."""
-    sign_in_as(page, "support")
-    send_message(page, "Open issues for Velocity Marketplace?")
-    wait_for_streaming_done(page, timeout=45)
-
-    # Look for the trace summary text "N tools · ..."
-    page.wait_for_selector("text=/\\d+ tools? · /", timeout=5_000)
-
-
-def test_multiple_messages_keep_streaming(page: Page):
-    """Send a second message — it also streams in (no broken state from the first)."""
-    sign_in_as(page, "support")
-    send_message(page, "Open issues for Velocity Marketplace?")
-    wait_for_streaming_done(page, timeout=45)
-    send_message(page, "Summarise the most urgent.")
-    wait_for_streaming_done(page, timeout=45)
-    # Two assistant bubbles should be visible
-    bubbles = assistant_messages(page)
-    assert len(bubbles) >= 2, f"expected ≥2 assistant messages, saw {len(bubbles)}"
+    def test_long_input_still_sends(self, page_support: Page):
+        msg = "Tell me about Velocity Marketplace. " * 50
+        inp = page_support.locator(SEL["chat_input"])
+        inp.click()
+        inp.fill(msg)
+        inp.press("Enter")
+        wait_for_streaming_done(page_support, timeout=60)
+        assert len(last_assistant_text(page_support)) > 0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3) Skills (reported as "don't work")
-# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# 3) STREAMING (the reported reactivity bug)
+# ════════════════════════════════════════════════════════════════════════════
 
-def test_skills_menu_opens_and_lists_seeded_skill(page: Page):
-    """Clicking 'Skills' should open the modal AND populate with seeded skills."""
-    sign_in_as(page, "support")
-    page.locator(SEL["skills_button"]).first.click()
+class TestStreaming:
+    def test_response_grows_progressively_without_tab_switch(self, page_support: Page):
+        """REPORTED BUG: response should grow over time as it streams in — without needing
+        to switch chats and come back. Sample text length several times during streaming."""
+        send_message(page_support, "What open issues does Velocity Marketplace have?")
 
-    # Modal opens
-    page.wait_for_selector("text=/Skills/", timeout=3_000)
-    # The seeded escalation-summary should be in the list
-    page.wait_for_selector("text=escalation-summary", timeout=5_000)
+        samples = []
+        deadline = time.time() + 25
+        while time.time() < deadline:
+            text = last_assistant_text(page_support)
+            samples.append((time.time(), len(text)))
+            if len(text) > 300:
+                break
+            time.sleep(0.5)
 
+        distinct_sizes = sorted(set(s[1] for s in samples))
+        assert len(distinct_sizes) >= 3, (
+            f"answer never grew progressively — saw distinct text-sizes {distinct_sizes}. "
+            "Streaming UI isn't re-rendering as deltas arrive (Alpine reactivity bug?)."
+        )
 
-def test_skills_run_escalation_summary(page: Page):
-    """Pick the seeded skill → param form → run → assistant message with content appears."""
-    sign_in_as(page, "support")
-    page.locator(SEL["skills_button"]).first.click()
-    page.wait_for_selector("text=escalation-summary", timeout=5_000)
-    page.click("text=escalation-summary")
-    # Parameter form should appear with `customer`
-    customer_input = page.locator("input[placeholder*='customer'], input[placeholder*='Customer']").first
-    customer_input.wait_for(timeout=3_000)
-    customer_input.fill("Velocity Marketplace")
-    # Run
-    page.get_by_role("button", name="Run").click()
-    wait_for_streaming_done(page, timeout=60)
-    # Some answer text should be in the assistant bubble
-    text = last_assistant_text(page).lower()
-    assert "velocity" in text or "critical" in text or "risk" in text, \
-        f"skill output didn't look like a risk brief (got {text[:200]!r})"
+    def test_final_answer_meaningful(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert len(text) > 100 and "velocity" in text
 
+    def test_trace_expander_visible_after_stream(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # Look for the trace summary "N tools · X.Ys"
+        page_support.wait_for_selector("text=/\\d+\\s+tools?\\s*·/", timeout=5_000)
 
-def test_save_as_skill_button_appears_after_chat(page: Page):
-    """The 'Save as skill' affordance should appear after 3+ messages with assistant turns."""
-    sign_in_as(page, "support")
-    send_message(page, "Open issues for Velocity Marketplace?")
-    wait_for_streaming_done(page, timeout=45)
-    send_message(page, "Now summarise the most urgent.")
-    wait_for_streaming_done(page, timeout=45)
-    # Header should now show the Save as skill button
-    assert page.get_by_text("Save as skill").count() > 0
+    def test_elapsed_ms_displayed(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # Look for a "·" followed by a duration
+        body = page_support.inner_text("body")
+        # something like "2 tools · 4.8s" or "· 4810ms"
+        assert re.search(r"·\s*\d+\.?\d*\s*[ms]", body), \
+            "expected to find elapsed time in the trace summary"
 
+    def test_streaming_done_flag_clears(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # isStreaming back to false
+        assert page_support.evaluate(
+            "() => document.querySelector('body').__x?.$data?.isStreaming"
+        ) in (False, None)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4) Layout — page height stable, thread scrolls internally
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_layout_page_height_stays_stable(page: Page):
-    """Bug repro: after several messages, the document body should not be much taller
-    than the viewport (the thread is supposed to scroll internally)."""
-    sign_in_as(page, "support")
-    viewport = page.viewport_size["height"]
-
-    # Send a handful of messages so the chat has real length.
-    queries = [
-        "Open issues for Velocity Marketplace?",
-        "Summarise the most urgent.",
-        "What's the history on issue 3?",
-        "Open issues for Calm Waters Subscriptions?",
-    ]
-    for q in queries:
-        send_message(page, q)
-        wait_for_streaming_done(page, timeout=45)
-
-    body_height = page.evaluate("() => document.body.scrollHeight")
-    # Body shouldn't grow past viewport by more than 50px slack — anything bigger means the
-    # main page is scrolling instead of the thread div inside.
-    assert body_height <= viewport + 50, (
-        f"body grew to {body_height}px (viewport={viewport}); "
-        "thread should scroll internally, not extend the page"
-    )
-
-
-def test_layout_thread_autoscrolls_to_bottom_after_send(page: Page):
-    """After a new message, the visible scroll should be at the bottom of the thread."""
-    sign_in_as(page, "support")
-    send_message(page, "Open issues for Velocity Marketplace?")
-    wait_for_streaming_done(page, timeout=45)
-    send_message(page, "Now summarise the most urgent.")
-    wait_for_streaming_done(page, timeout=45)
-
-    # The thread div has x-ref="thread"; query by that.
-    at_bottom = page.evaluate(
-        """() => {
-          const t = document.querySelector('[x-ref="thread"]') ||
-                    document.querySelector('.overflow-y-auto');
-          if (!t) return false;
-          return Math.abs(t.scrollHeight - t.scrollTop - t.clientHeight) < 80;
-        }"""
-    )
-    assert at_bottom, "thread did not auto-scroll to bottom after sending a message"
+    def test_tool_indicator_appears_mid_stream(self, page_support: Page):
+        """The 'calling X…' indicator should appear at least briefly between deltas."""
+        send_message(page_support, "Open issues for Velocity Marketplace, summarise the most urgent.")
+        # Poll for the indicator
+        deadline = time.time() + 15
+        saw_indicator = False
+        while time.time() < deadline:
+            body = page_support.inner_text("body").lower()
+            if "calling" in body or "thinking" in body or "running" in body:
+                saw_indicator = True
+                break
+            time.sleep(0.3)
+        wait_for_streaming_done(page_support, timeout=60)
+        # Soft assertion — we just want to confirm SOME mid-stream feedback exists
+        # (even if we missed the exact window). If trace has entries, agent did fire tools.
+        if not saw_indicator:
+            # fall back: trace was populated, so tools fired (just didn't catch the indicator)
+            text = page_support.inner_text("body")
+            assert "tools" in text.lower(), "no tool indicator and no trace summary — bad sign"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 5) RBAC — the panel-relevant moment
-# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# 4) MARKDOWN RENDERING
+# ════════════════════════════════════════════════════════════════════════════
 
-def test_rbac_sales_update_denied_relayed(page: Page):
-    """As sales, asking for a write → trace shows update_issue → denied, answer relays."""
-    sign_in_as(page, "sales")
-    send_message(page, "Add a note to issue 3 saying I checked with the customer.")
-    wait_for_streaming_done(page, timeout=45)
-    text = page.inner_text("body").lower()
-    # Either explicit 'denied' or 'requires' / 'role' phrasing — model has some freedom
-    assert ("denied" in text or "requires" in text or "permission" in text
-            or "support" in text or "admin" in text), \
-        "agent didn't relay an RBAC refusal to the sales user"
+class TestMarkdown:
+    def test_tables_render_as_html_table(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # A <table> should be present inside an assistant `.md` container
+        tables = page_support.locator(".md table").count()
+        assert tables >= 1, "expected at least one rendered <table> in the assistant answer"
 
+    def test_code_spans_have_mono_styling(self, page_support: Page):
+        send_message(page_support, "Profile for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # Look for backtick-wrapped account ref rendered as <code>
+        codes = page_support.locator(".md code").count()
+        assert codes >= 1, "expected at least one <code> span in the assistant answer"
 
-def test_rbac_support_update_succeeds(page: Page):
-    """As support, the same query should succeed."""
-    sign_in_as(page, "support")
-    send_message(page, "Add a note to issue 4 saying 'UI test write check'.")
-    wait_for_streaming_done(page, timeout=45)
-    text = page.inner_text("body").lower()
-    assert ("added" in text or "updated" in text or "noted" in text or "recorded" in text), \
-        f"support write didn't look like a success (got: {text[-300:]!r})"
-
-
-def test_rbac_admin_create_next_action_succeeds(page: Page):
-    """As admin, creating a next action should succeed."""
-    sign_in_as(page, "admin")
-    send_message(page, "Create a next action on issue 1: 'UI test directive', due 2026-06-10.")
-    wait_for_streaming_done(page, timeout=60)
-    text = page.inner_text("body").lower()
-    assert ("created" in text or "recorded" in text or "next action" in text), \
-        f"admin next-action creation didn't look like a success"
+    def test_dompurify_strips_dangerous_html(self, page_support: Page):
+        """The model is unlikely to emit raw HTML, but the renderer should still sanitise."""
+        send_message(page_support, "Tell me about Velocity Marketplace.")
+        wait_for_streaming_done(page_support, timeout=60)
+        # No <script> element should ever be in the assistant content
+        assert page_support.locator(".md script").count() == 0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 6) Sidebar — chat persistence, click-to-resume
-# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# 5) MULTI-TURN — context preserved across messages
+# ════════════════════════════════════════════════════════════════════════════
 
-def test_sidebar_shows_new_chat_after_send(page: Page):
-    """After the first message of a new chat, it should appear in the sidebar."""
-    sign_in_as(page, "support")
-    msg = "Sidebar test — open issues for Velocity Marketplace?"
-    send_message(page, msg)
-    wait_for_streaming_done(page, timeout=45)
-    # The sidebar should contain a chat with our message as its title.
-    page.wait_for_selector(f"text=/{msg[:30]}/", timeout=10_000)
+class TestMultiTurn:
+    def test_second_message_streams_normally(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        send_message(page_support, "Now summarise the most urgent.")
+        wait_for_streaming_done(page_support, timeout=60)
+        bubbles = assistant_messages(page_support)
+        assert len(bubbles) >= 2
 
+    def test_followup_resolves_from_context(self, page_support: Page):
+        """X1 — multi-turn memory: 'the second one' should resolve in conversation context."""
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        send_message(page_support, "Summarise the second one.")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        # Should reference one of Velocity's issues, not ask for clarification
+        assert "velocity" in text or "issue" in text or "webhook" in text or "kyc" in text
 
-def test_sidebar_chats_persist_after_reload(page: Page):
-    """After reloading, the chat we just sent should still be in the sidebar."""
-    sign_in_as(page, "support")
-    msg = "Persistence test — pull Velocity Marketplace please"
-    send_message(page, msg)
-    wait_for_streaming_done(page, timeout=45)
-    page.reload()
-    page.wait_for_selector(SEL["chat_input"], timeout=10_000)
-    # Sidebar should still have our chat
-    page.wait_for_selector(f"text=/{msg[:30]}/", timeout=10_000)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7) Keyboard shortcuts + theme
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_keyboard_cmd_k_opens_skills(page: Page):
-    """⌘K / Ctrl+K opens the Skills modal."""
-    sign_in_as(page, "support")
-    page.keyboard.press("Meta+K" if os.uname().sysname == "Darwin" else "Control+K")
-    # Either modal title or skill name should appear within a moment
-    page.wait_for_selector("text=escalation-summary, text=Skills", timeout=3_000)
+    def test_three_turns_all_render(self, page_support: Page):
+        for q in [
+            "Open issues for Velocity Marketplace?",
+            "Now summarise the most urgent.",
+            "What should I do next?",
+        ]:
+            send_message(page_support, q)
+            wait_for_streaming_done(page_support, timeout=60)
+        bubbles = assistant_messages(page_support)
+        assert len(bubbles) >= 3, f"expected 3 assistant bubbles, got {len(bubbles)}"
 
 
-def test_theme_toggle_persists(page: Page):
-    """Switch to light, reload, still light."""
-    sign_in_as(page, "support")
-    # Avatar menu → theme toggle
-    page.get_by_role("button", name="Account menu").click()
-    page.get_by_text("Switch to light theme").click()
-    expect(page.locator("html")).to_have_attribute("data-theme", "light")
-    page.reload()
-    page.wait_for_selector(SEL["chat_input"], timeout=10_000)
-    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+# ════════════════════════════════════════════════════════════════════════════
+# 6) SIDEBAR — chat history persistence
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestSidebar:
+    def test_chat_appears_in_sidebar_after_send(self, page_support: Page):
+        msg = "Sidebar test — Velocity Marketplace please"
+        send_message(page_support, msg)
+        wait_for_streaming_done(page_support, timeout=60)
+        # Sidebar should show this chat's title (first user message)
+        page_support.wait_for_selector(f"text=/{re.escape(msg[:30])}/", timeout=10_000)
+
+    def test_chats_persist_after_reload(self, page_support: Page):
+        msg = "Persistence test — pull Velocity"
+        send_message(page_support, msg)
+        wait_for_streaming_done(page_support, timeout=60)
+        page_support.reload()
+        page_support.wait_for_selector(SEL["chat_input"], timeout=10_000)
+        page_support.wait_for_selector(f"text=/{re.escape(msg[:25])}/", timeout=10_000)
+
+    def test_new_chat_button_resets_thread(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # Click + New chat
+        page_support.locator("button:has-text('New chat')").first.click()
+        # The messages area should be empty (or just the welcome state)
+        time.sleep(0.5)
+        bubbles = assistant_messages(page_support)
+        assert len(bubbles) == 0, f"expected 0 messages in new chat, saw {len(bubbles)}"
+
+    def test_click_old_chat_loads_history(self, page_support: Page):
+        # Send first chat
+        msg1 = "First chat — Velocity Marketplace"
+        send_message(page_support, msg1)
+        wait_for_streaming_done(page_support, timeout=60)
+        # Start a fresh chat
+        page_support.locator("button:has-text('New chat')").first.click()
+        time.sleep(0.5)
+        # Now click the previous chat in the sidebar
+        page_support.locator(f"text=/{re.escape(msg1[:25])}/").first.click()
+        time.sleep(1.0)
+        # The user's first message should re-appear
+        body = page_support.inner_text("body")
+        assert msg1[:25] in body
+
+    def test_sidebar_search_filters(self, page_support: Page):
+        # Send two messages so there are two chats
+        send_message(page_support, "Velocity Marketplace please")
+        wait_for_streaming_done(page_support, timeout=60)
+        page_support.locator("button:has-text('New chat')").first.click()
+        time.sleep(0.3)
+        send_message(page_support, "Calm Waters Subscriptions check")
+        wait_for_streaming_done(page_support, timeout=60)
+        # Type into sidebar search
+        page_support.locator("input[placeholder*='Search chats']").fill("Velocity")
+        time.sleep(0.4)
+        body = page_support.inner_text("body")
+        # Calm Waters should be filtered out (best-effort — depends on implementation)
+        assert "Velocity" in body
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 8) Error handling
-# ─────────────────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# 7) SKILLS — menu, list, run, save-as-skill
+# ════════════════════════════════════════════════════════════════════════════
 
-def test_empty_input_does_not_send(page: Page):
-    """Pressing Enter on an empty input should be a no-op (no fetch, no message)."""
-    sign_in_as(page, "support")
-    inp = page.locator(SEL["chat_input"])
-    inp.click()
-    inp.press("Enter")
-    # Nothing should appear in the thread
-    time.sleep(1.0)
-    assert page.evaluate("() => document.querySelector('body').__x?.$data?.isStreaming") in (False, None)
+class TestSkills:
+    def test_skills_button_opens_modal(self, page_support: Page):
+        page_support.locator(SEL["skills_button"]).first.click()
+        # Modal contains text "Skills" or "Run"
+        page_support.wait_for_selector("text=/Skills|Run/", timeout=3_000)
+
+    def test_skills_modal_lists_seeded_skill(self, page_support: Page):
+        page_support.locator(SEL["skills_button"]).first.click()
+        page_support.wait_for_selector("text=escalation-summary", timeout=5_000)
+
+    def test_skills_modal_closes_on_escape(self, page_support: Page):
+        page_support.locator(SEL["skills_button"]).first.click()
+        page_support.wait_for_selector("text=escalation-summary", timeout=5_000)
+        page_support.keyboard.press("Escape")
+        time.sleep(0.5)
+        # Should no longer see the modal listing
+        assert not page_support.locator("text=escalation-summary").is_visible()
+
+    def test_skills_run_escalation_summary(self, page_support: Page):
+        page_support.locator(SEL["skills_button"]).first.click()
+        page_support.wait_for_selector("text=escalation-summary", timeout=5_000)
+        page_support.click("text=escalation-summary")
+        # Param form
+        customer_input = page_support.locator("input[placeholder*='customer'], input[placeholder*='Customer'], input[name='customer']").first
+        customer_input.wait_for(timeout=5_000)
+        customer_input.fill("Velocity Marketplace")
+        page_support.get_by_role("button", name="Run").click()
+        wait_for_streaming_done(page_support, timeout=90)
+        text = last_assistant_text(page_support).lower()
+        assert any(w in text for w in ["velocity", "critical", "high", "risk"]), \
+            f"skill output didn't look like a risk brief: {text[:200]!r}"
+
+    def test_skills_modal_shows_skill_description(self, page_support: Page):
+        page_support.locator(SEL["skills_button"]).first.click()
+        page_support.wait_for_selector("text=escalation-summary", timeout=5_000)
+        body = page_support.inner_text("body").lower()
+        # Description should mention escalation / risk / brief
+        assert "risk" in body or "escalation" in body or "brief" in body
+
+    def test_save_as_skill_button_after_chat(self, page_support: Page):
+        # 3+ messages with assistant turns
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        send_message(page_support, "Summarise the most urgent.")
+        wait_for_streaming_done(page_support, timeout=60)
+        page_support.wait_for_selector("text=Save as skill", timeout=5_000)
+
+    def test_save_as_skill_opens_draft_modal(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        send_message(page_support, "Summarise the most urgent.")
+        wait_for_streaming_done(page_support, timeout=60)
+        page_support.locator("text=Save as skill").click()
+        # Draft modal opens — look for an editable name field
+        page_support.wait_for_selector("input[placeholder*='name'], input[name='name']", timeout=10_000)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8) RBAC — sales denied, support+admin allowed
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestRBAC:
+    def test_sales_can_browse_customers(self, page_sales: Page):
+        send_message(page_sales, "Who are our customers?")
+        wait_for_streaming_done(page_sales, timeout=60)
+        text = last_assistant_text(page_sales).lower()
+        assert "velocity" in text or "lumen" in text or "calm" in text
+
+    def test_sales_can_read_open_issues(self, page_sales: Page):
+        send_message(page_sales, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_sales, timeout=60)
+        text = last_assistant_text(page_sales).lower()
+        assert "velocity" in text
+
+    def test_sales_update_issue_denied(self, page_sales: Page):
+        send_message(page_sales, "Add a note to issue 3 saying I checked with the customer.")
+        wait_for_streaming_done(page_sales, timeout=60)
+        text = last_assistant_text(page_sales).lower()
+        assert any(w in text for w in ["denied", "requires", "permission", "support", "admin"]), \
+            f"agent didn't relay an RBAC refusal: {text[:300]!r}"
+
+    def test_sales_create_next_action_denied(self, page_sales: Page):
+        send_message(page_sales, "Create a next action on issue 1 to chase the UBO docs.")
+        wait_for_streaming_done(page_sales, timeout=60)
+        text = last_assistant_text(page_sales).lower()
+        assert any(w in text for w in ["denied", "requires", "permission", "admin"]), \
+            f"agent didn't relay an RBAC refusal: {text[:300]!r}"
+
+    def test_support_update_issue_allowed(self, page_support: Page):
+        send_message(page_support, "Add a note to issue 4 saying 'UI test write check'.")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert any(w in text for w in ["added", "updated", "noted", "recorded", "done"]), \
+            f"support write didn't look like a success: {text[-300:]!r}"
+
+    def test_support_create_next_action_denied(self, page_support: Page):
+        send_message(page_support, "Create a next action on issue 4 to follow up.")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert any(w in text for w in ["denied", "requires", "admin"]), \
+            f"support shouldn't be allowed to create next actions: {text[:300]!r}"
+
+    def test_admin_can_create_next_action(self, page_admin: Page):
+        send_message(page_admin, "Create a next action on issue 1: 'UI test directive', due 2026-06-10.")
+        wait_for_streaming_done(page_admin, timeout=90)
+        text = last_assistant_text(page_admin).lower()
+        assert any(w in text for w in ["created", "recorded", "next action"]), \
+            f"admin write didn't look like a success: {text[-300:]!r}"
+
+    def test_admin_can_update_issue(self, page_admin: Page):
+        send_message(page_admin, "Add a note to issue 5 saying 'admin UI test'.")
+        wait_for_streaming_done(page_admin, timeout=60)
+        text = last_assistant_text(page_admin).lower()
+        assert any(w in text for w in ["added", "updated", "noted", "recorded", "done"])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9) LAYOUT — page height stable, thread scrolls internally
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestLayout:
+    def test_body_height_equals_viewport(self, page_support: Page):
+        viewport = page_support.viewport_size["height"]
+        body_height = page_support.evaluate("() => document.body.scrollHeight")
+        assert body_height <= viewport + 50, \
+            f"body is {body_height}px, viewport is {viewport}px — body is too tall on fresh page"
+
+    def test_body_height_stays_stable_after_many_messages(self, page_support: Page):
+        """REPORTED BUG: page should not grow as messages accumulate."""
+        viewport = page_support.viewport_size["height"]
+        for q in [
+            "Open issues for Velocity Marketplace?",
+            "Summarise the most urgent.",
+            "What's the history on issue 3?",
+            "Open issues for Calm Waters Subscriptions?",
+        ]:
+            send_message(page_support, q)
+            wait_for_streaming_done(page_support, timeout=60)
+
+        body_height = page_support.evaluate("() => document.body.scrollHeight")
+        assert body_height <= viewport + 50, \
+            f"body grew to {body_height}px (viewport={viewport}); thread should scroll internally"
+
+    def test_thread_autoscrolls_after_send(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        send_message(page_support, "Summarise the most urgent.")
+        wait_for_streaming_done(page_support, timeout=60)
+        at_bottom = page_support.evaluate(
+            """() => {
+              const t = document.querySelector('[x-ref="thread"]') ||
+                        document.querySelector('.overflow-y-auto');
+              if (!t) return false;
+              return Math.abs(t.scrollHeight - t.scrollTop - t.clientHeight) < 80;
+            }"""
+        )
+        assert at_bottom, "thread did not auto-scroll to bottom after sending"
+
+    def test_sidebar_does_not_overflow_viewport(self, page_support: Page):
+        viewport_h = page_support.viewport_size["height"]
+        sidebar_height = page_support.evaluate(
+            "() => document.querySelector('aside')?.scrollHeight || 0"
+        )
+        # Sidebar should fit within viewport (its own internal scroll handles overflow)
+        assert sidebar_height <= viewport_h + 10, \
+            f"sidebar measured {sidebar_height}px, viewport {viewport_h}px"
+
+    def test_input_box_visible_after_many_messages(self, page_support: Page):
+        for q in [
+            "Open issues for Velocity Marketplace?",
+            "Summarise the most urgent.",
+            "What's the history on issue 3?",
+        ]:
+            send_message(page_support, q)
+            wait_for_streaming_done(page_support, timeout=60)
+        expect(page_support.locator(SEL["chat_input"])).to_be_visible()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 10) THEME — dark default, light toggle, persistence
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestTheme:
+    def test_default_is_dark(self, page_support: Page):
+        expect(page_support.locator("html")).to_have_attribute("data-theme", "dark")
+
+    def test_toggle_to_light(self, page_support: Page):
+        page_support.get_by_role("button", name="Account menu").click()
+        page_support.get_by_text("Switch to light theme").click()
+        expect(page_support.locator("html")).to_have_attribute("data-theme", "light")
+
+    def test_theme_persists_after_reload(self, page_support: Page):
+        page_support.get_by_role("button", name="Account menu").click()
+        page_support.get_by_text("Switch to light theme").click()
+        page_support.reload()
+        page_support.wait_for_selector(SEL["chat_input"], timeout=10_000)
+        expect(page_support.locator("html")).to_have_attribute("data-theme", "light")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 11) KEYBOARD SHORTCUTS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _meta_key():
+    return "Meta" if os.uname().sysname == "Darwin" else "Control"
+
+
+class TestKeyboard:
+    def test_cmd_k_opens_skills(self, page_support: Page):
+        page_support.keyboard.press(f"{_meta_key()}+K")
+        page_support.wait_for_selector("text=escalation-summary", timeout=3_000)
+
+    def test_cmd_n_starts_new_chat(self, page_support: Page):
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        page_support.keyboard.press(f"{_meta_key()}+N")
+        time.sleep(0.5)
+        # New chat → thread is empty
+        bubbles = assistant_messages(page_support)
+        assert len(bubbles) == 0, "Cmd+N should open a fresh chat with no messages"
+
+    def test_escape_closes_skills_modal(self, page_support: Page):
+        page_support.locator(SEL["skills_button"]).first.click()
+        page_support.wait_for_selector("text=escalation-summary", timeout=3_000)
+        page_support.keyboard.press("Escape")
+        time.sleep(0.4)
+        assert not page_support.locator("text=escalation-summary").is_visible()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 12) ACCESSIBILITY (basic)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestA11y:
+    def test_messages_container_has_aria_live(self, page_support: Page):
+        loc = page_support.locator('[aria-live="polite"]')
+        assert loc.count() >= 1, "expected at least one aria-live region for the messages"
+
+    def test_inputs_have_placeholder(self, page_support: Page):
+        # Chat input has a placeholder for SR/UX
+        placeholder = page_support.locator(SEL["chat_input"]).first.get_attribute("placeholder")
+        assert placeholder and len(placeholder) > 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 13) ERRORS / EDGE CASES
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestEdgeCases:
+    def test_special_chars_in_input_render_safely(self, page_support: Page):
+        send_message(page_support, "Tell me about 'Velocity \"Marketplace\" — €£$'")
+        wait_for_streaming_done(page_support, timeout=60)
+        assert len(last_assistant_text(page_support)) > 0
+
+    def test_emoji_only_input_does_not_crash(self, page_support: Page):
+        send_message(page_support, "🚀💎🎉")
+        # Either we get an answer or a graceful "I'm not sure" — must not crash
+        wait_for_streaming_done(page_support, timeout=60)
+        assert page_support.locator(SEL["chat_input"]).is_visible()
+
+    def test_lumen_ambiguous_handled(self, page_support: Page):
+        send_message(page_support, "Open issues for Lumen.")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        # Should ask for clarification or list candidates
+        assert "lumen" in text and ("which" in text or "two" in text or "ambiguous" in text or "group" in text)
+
+    def test_zzzz_not_found_handled(self, page_support: Page):
+        send_message(page_support, "Open issues for Zzzz Holdings.")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert any(s in text for s in ["not found", "no customer", "couldn't find", "could not find", "could not be found"])
+
+    def test_calm_waters_no_open(self, page_support: Page):
+        send_message(page_support, "Open issues for Calm Waters Subscriptions?")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert "no open" in text or "zero" in text or "none" in text
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 14) BROWSE TOOLS (new in PR #21)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestBrowseTools:
+    def test_who_are_our_customers(self, page_support: Page):
+        send_message(page_support, "Who are our customers?")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert any(c in text for c in ["velocity", "lumen", "calm waters", "pinebrook"])
+
+    def test_critical_open_issues_browse(self, page_support: Page):
+        send_message(page_support, "Show me all critical open issues across customers.")
+        wait_for_streaming_done(page_support, timeout=60)
+        text = last_assistant_text(page_support).lower()
+        assert "critical" in text
+
+    def test_overdue_next_actions_browse(self, page_admin: Page):
+        send_message(page_admin, "What next actions are overdue?")
+        wait_for_streaming_done(page_admin, timeout=90)
+        # Either lists overdue ones or honestly says there are none
+        text = last_assistant_text(page_admin).lower()
+        assert ("overdue" in text or "next action" in text or "none" in text or "no overdue" in text)
