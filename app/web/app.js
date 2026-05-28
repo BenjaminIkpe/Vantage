@@ -25,6 +25,23 @@ function previewArgs(args) {
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const SLOW = reducedMotion ? 0.05 : 1; // multiplier; near-zero when reduced motion is on
 
+function relativeTime(unixTs) {
+  const diff = Math.floor(Date.now() / 1000) - unixTs;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 2) return "Yesterday";
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+  return new Date(unixTs * 1000).toLocaleDateString();
+}
+function bucketTime(unixTs) {
+  const diff = Math.floor(Date.now() / 1000) - unixTs;
+  if (diff < 86400) return "Today";
+  if (diff < 86400 * 2) return "Yesterday";
+  if (diff < 86400 * 7) return "Last 7 days";
+  return "Earlier";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Roles & RBAC (matches Vantage-vault/02-User-Stories.md role × tool matrix)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -393,7 +410,10 @@ window.vantage = function () {
 
     // lifecycle
     init() {
-      this.chats = seedChats();
+      // sidebar + skill list populate from real backend after auth resolves
+      this.chats = [];
+      this.skills = [];
+      this.activeChatId = null;
       // restore theme
       const saved = localStorage.getItem("vantage.theme");
       if (saved === "light" || saved === "dark") this.setTheme(saved);
@@ -409,7 +429,7 @@ window.vantage = function () {
         }
       });
       this.$nextTick(() => this.scrollToEnd());
-      // Ask the backend who's logged in (cookie flows automatically).
+      // Ask the backend who's logged in (cookie flows automatically), then load history.
       this.whoami();
     },
 
@@ -426,8 +446,67 @@ window.vantage = function () {
         const matched = (data.roles || []).map((r) => roleMap[r]).find(Boolean);
         if (matched) this.role = matched;
         this.authStatus = "authed";
+        // Now that we're authed, pull the user's chat history + skills library.
+        await Promise.all([this.loadSessions(), this.loadSkills()]);
+        // Open the most recent chat, or start an empty new one.
+        if (this.chats.length) this.openChat(this.chats[0].id);
+        else this.newChat();
       } catch (e) {
         this.authStatus = "guest";
+      }
+    },
+
+    // ─── Real-backend data loaders ───
+    async loadSessions() {
+      try {
+        const r = await fetch("/sessions", { credentials: "include" });
+        if (!r.ok) throw new Error(`sessions ${r.status}`);
+        const data = await r.json();
+        // Map server shape {id, title, last_updated} → UI shape used by the sidebar.
+        this.chats = (data.sessions || []).map((s) => ({
+          id: s.id,
+          title: s.title,
+          time: relativeTime(s.last_updated),
+          group: bucketTime(s.last_updated),
+          messages: [],   // loaded lazily when the chat is opened
+          loaded: false,
+        }));
+      } catch (e) {
+        this.chats = [];
+      }
+    },
+
+    async loadSessionMessages(id) {
+      const chat = this.chats.find((c) => c.id === id);
+      if (!chat || chat.loaded) return;
+      try {
+        const r = await fetch(`/sessions/${encodeURIComponent(id)}`, { credentials: "include" });
+        if (!r.ok) return;
+        const data = await r.json();
+        // Server stores {role:'user'|'assistant', content:string}. Map to UI message shape.
+        chat.messages = (data.messages || []).map((m) => ({
+          id: MID++, role: m.role,
+          text: m.role === "user" ? m.content : "",
+          md:   m.role === "assistant" ? m.content : "",
+          trace: [], elapsedMs: 0,
+        }));
+        chat.loaded = true;
+        this.$nextTick(() => this.scrollToEnd());
+      } catch {}
+    },
+
+    async loadSkills() {
+      try {
+        const r = await fetch("/skills", { credentials: "include" });
+        if (!r.ok) throw new Error(`skills ${r.status}`);
+        const data = await r.json();
+        this.skills = (data.skills || []).map((s) => ({
+          name: s.name, description: s.description,
+          parameters: s.parameters || [],
+          allowed_tools: s.allowed_tools || [],
+        }));
+      } catch (e) {
+        this.skills = [];
       }
     },
     signIn()  { window.location.href = "/auth/login"; },
@@ -468,8 +547,13 @@ window.vantage = function () {
 
     // chat lifecycle
     newChat() {
+      // Local placeholder; the session is materialised server-side on the first /ask call
+      // (the backend stamps a session_id; we adopt it from the response).
       const id = uid("chat");
-      this.chats.unshift({ id, title: "", time: "now", group: "Today", messages: [] });
+      this.chats.unshift({
+        id, title: "", time: "now", group: "Today",
+        messages: [], loaded: true, isNew: true,
+      });
       this.activeChatId = id;
       this.input = "";
       this.$nextTick(() => this.scrollToEnd());
@@ -477,6 +561,8 @@ window.vantage = function () {
     openChat(id) {
       this.activeChatId = id;
       this.cancelRequested = true;
+      // Lazy-load the conversation history from the server on first open.
+      this.loadSessionMessages(id);
       this.$nextTick(() => this.scrollToEnd());
     },
 
@@ -505,7 +591,9 @@ window.vantage = function () {
     },
 
     async runAgent(chat, text) {
-      const route = routeQuery(text, this.role);
+      // Push a placeholder assistant message; the "thinking" UI is bound to `streaming` until
+      // /ask returns. Real per-token streaming lands in a later PR; for now we just await
+      // the full response and drop it in. The trace + elapsed_ms come from the server.
       const ass = {
         id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
         streaming: true, currentTool: null, errored: null,
@@ -513,45 +601,61 @@ window.vantage = function () {
       chat.messages.push(ass);
       this.isStreaming = true;
       this.cancelRequested = false;
+      // For the "calling…" indicator, we don't know the tool yet — generic placeholder.
+      ass.currentTool = { tool: "thinking", argPreview: "" };
+      this.$nextTick(() => this.scrollToEnd());
 
-      // network error path
-      if (route.error) {
-        await sleep(900 * SLOW);
-        if (this.cancelRequested) return this.finishStreaming(ass);
-        ass.errored = route.error;
-        return this.finishStreaming(ass);
-      }
+      try {
+        // Don't send a session_id on the very first message of a new chat — the backend
+        // mints one and we adopt it from the response (it becomes the chat's permanent id).
+        const body = { query: text };
+        if (!chat.isNew) body.session_id = chat.id;
 
-      // tool-call loop
-      const start = performance.now();
-      for (const t of route.tools) {
-        if (this.cancelRequested) return this.finishStreaming(ass);
-        ass.currentTool = { tool: t.tool, argPreview: previewArgs(t.args) };
-        await sleep(Math.min(900, t.ms * 6) * SLOW);
-        ass.currentTool = null;
-        ass.trace.push({
-          tool: t.tool,
-          argPreview: previewArgs(t.args),
-          status: t.status,
-          ms: t.ms,
+        const r = await fetch("/ask", {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
-        ass.elapsedMs = Math.round(performance.now() - start);
-        this.$nextTick(() => this.scrollToEnd());
-      }
 
-      // stream the markdown
-      const md = route.md || "";
-      const chunkSize = reducedMotion ? md.length : 3;
-      for (let i = 0; i < md.length; i += chunkSize) {
-        if (this.cancelRequested) break;
-        ass.md = md.slice(0, i + chunkSize);
-        ass.elapsedMs = Math.round(performance.now() - start);
-        if (i % 30 === 0) this.$nextTick(() => this.scrollToEnd());
-        await sleep(reducedMotion ? 0 : 6);
+        if (r.status === 401) {
+          ass.errored = "Session expired. Please sign in again.";
+          this.authStatus = "guest";
+          return this.finishStreaming(ass);
+        }
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `${r.status}`);
+          ass.errored = `Agent error (${r.status}): ${detail.slice(0, 240)}`;
+          return this.finishStreaming(ass);
+        }
+
+        const data = await r.json();
+        // First /ask of a new chat: adopt the server's session_id as the chat id, so the
+        // sidebar entry and the session record line up from here on.
+        if (chat.isNew && data.session_id) {
+          chat.id = data.session_id;
+          chat.isNew = false;
+          this.activeChatId = data.session_id;
+          // The server now has the title; pull a fresh list to surface this chat properly.
+          this.loadSessions();
+        } else {
+          // Just bump the time of an existing chat.
+          chat.time = "just now";
+          chat.group = "Today";
+        }
+
+        ass.md = data.answer || "";
+        ass.trace = (data.trace || []).map((t) => ({
+          tool: t.tool,
+          argPreview: previewArgs(t.input || {}),
+          status: (t.result && t.result.status) || "ok",
+          ms: t.ms || 0,
+        }));
+        ass.elapsedMs = data.elapsed_ms || 0;
+      } catch (e) {
+        ass.errored = `Network error: ${e.message || e}`;
+      } finally {
+        this.finishStreaming(ass);
       }
-      ass.md = md;
-      ass.elapsedMs = route.elapsedMs;
-      this.finishStreaming(ass);
     },
 
     finishStreaming(ass) {
@@ -584,81 +688,134 @@ window.vantage = function () {
       this.runAgent(chat, prior.text);
     },
 
-    // skills
-    openSkillsMenu() {
+    // skills — list, select, run (against the real /skills/* endpoints)
+    async openSkillsMenu() {
       this.showSkillsMenu = true;
       this.activeSkill = null;
       this.skillsSearch = "";
+      // Refresh on open so newly-authored skills show up immediately.
+      await this.loadSkills();
     },
     selectSkill(s) {
       this.activeSkill = s;
       this.skillParams = {};
       s.parameters.forEach(p => { this.skillParams[p.name] = ""; });
-      // sensible defaults for the demo
-      if (s.name === "escalation-summary") this.skillParams.customer = "Velocity Marketplace";
-      if (s.name === "handoff-brief") this.skillParams.issue_id = "3";
     },
-    runSkill() {
+    async runSkill() {
       const s = this.activeSkill;
       if (!s) return;
       const missing = s.parameters.filter(p => p.required && !String(this.skillParams[p.name] || "").trim());
       if (missing.length) { this.flash(`Missing: ${missing.map(p => p.name).join(", ")}`); return; }
       this.showSkillsMenu = false;
-      // ensure we have an active chat
-      const chat = this.activeChat;
-      const param = Object.entries(this.skillParams).map(([k,v]) => `${k}=${v}`).join(" ");
-      const pretty = `/${s.name} ${param}`;
-      if (!chat.title) chat.title = `Skill — ${s.name}`;
-      chat.messages.push({ id: MID++, role: "user", text: pretty });
-      // Translate to a routed query that mirrors what the skill would do
-      this.$nextTick(() => this.scrollToEnd());
-      this.runAgent(chat, this.skillToQuery(s, this.skillParams));
+      const params = { ...this.skillParams };
       this.activeSkill = null;
-    },
-    skillToQuery(s, params) {
-      if (s.name === "escalation-summary") {
-        return `risk brief for ${params.customer}: open issues, most urgent, recommended next action`;
+
+      // Show the invocation as a user turn (formatted), then call the skill endpoint.
+      const chat = this.activeChat;
+      const paramStr = Object.entries(params).map(([k,v]) => `${k}=${v}`).join(" ");
+      chat.messages.push({ id: MID++, role: "user", text: `/${s.name} ${paramStr}` });
+      if (!chat.title) chat.title = `Skill — ${s.name}`;
+      this.$nextTick(() => this.scrollToEnd());
+
+      const ass = {
+        id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
+        streaming: true, currentTool: { tool: `skill:${s.name}`, argPreview: paramStr },
+        errored: null,
+      };
+      chat.messages.push(ass);
+      this.isStreaming = true;
+
+      try {
+        const r = await fetch(`/skills/${encodeURIComponent(s.name)}/run`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ params }),
+        });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `${r.status}`);
+          ass.errored = `Skill error (${r.status}): ${detail.slice(0, 240)}`;
+          return this.finishStreaming(ass);
+        }
+        const data = await r.json();
+        // Skill runs may return {status:'error',reason} as a normal 200 — show that inline.
+        if (data.status === "error") {
+          ass.errored = data.reason || "Skill returned an error.";
+          return this.finishStreaming(ass);
+        }
+        ass.md = data.answer || "";
+        ass.trace = (data.trace || []).map((t) => ({
+          tool: t.tool, argPreview: previewArgs(t.input || {}),
+          status: (t.result && t.result.status) || "ok", ms: t.ms || 0,
+        }));
+        ass.elapsedMs = data.elapsed_ms || 0;
+      } catch (e) {
+        ass.errored = `Network error: ${e.message || e}`;
+      } finally {
+        this.finishStreaming(ass);
       }
-      if (s.name === "handoff-brief") {
-        return `velocity webhook handoff brief for issue ${params.issue_id}`;
-      }
-      return `run ${s.name} with ${JSON.stringify(params)}`;
     },
 
-    // save as skill
-    openSaveSkill() {
+    // save-as-skill — backend generalises the session into a draft, user reviews + saves
+    async openSaveSkill() {
       const chat = this.activeChat;
-      if (!chat) return;
-      // Derive a draft from the actual messages: title-derived name, instructions w/ placeholders, allowed_tools = union of tool calls
-      const tools = new Set();
-      chat.messages.forEach(m => {
-        if (m.role === "assistant" && m.trace) m.trace.forEach(t => { if (t.status !== "denied") tools.add(t.tool); });
-      });
-      const firstUser = chat.messages.find(m => m.role === "user")?.text || "";
-      const name = this.slugify(firstUser).slice(0, 36) || "new-skill";
-      const customer = pickCustomerWord(firstUser) || "the named customer";
-      const instructions = firstUser
-        ? firstUser.replace(new RegExp(customer, "g"), "{customer}") + `\n\nGround every claim in tool results. If the customer is not found or ambiguous, say so plainly.`
-        : "";
-      this.skillDraft = {
-        name,
-        description: `Generalised from "${chat.title || firstUser}" — see editable instructions below.`,
-        instructions,
-        parameters: [{ name: "customer", description: "Customer name (or partial name)", required: true }],
-        allowed_tools: [...tools],
-      };
-      this.showSaveSkill = true;
+      if (!chat || !chat.id || chat.isNew) {
+        this.flash("Send at least one message first — the skill is generalised from the conversation.");
+        return;
+      }
+      try {
+        const r = await fetch("/skills/draft-from-session", {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: chat.id }),
+        });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `${r.status}`);
+          this.flash(`Couldn't draft skill (${r.status}): ${detail.slice(0, 120)}`);
+          return;
+        }
+        const data = await r.json();
+        if (data.status !== "draft" || !data.skill) {
+          this.flash(data.reason || "Couldn't draft skill from this session.");
+          return;
+        }
+        // Adopt the server's draft into the UI's editable form.
+        this.skillDraft = {
+          name: data.skill.name || "new-skill",
+          description: data.skill.description || "",
+          instructions: data.skill.instructions || "",
+          parameters: data.skill.parameters || [],
+          allowed_tools: data.skill.allowed_tools || [],
+        };
+        this.showSaveSkill = true;
+      } catch (e) {
+        this.flash(`Network error drafting skill: ${e.message || e}`);
+      }
     },
-    saveSkillFromDraft() {
+    async saveSkillFromDraft() {
       const d = this.skillDraft;
-      this.skills.unshift({
-        name: d.name, description: d.description,
-        parameters: d.parameters.filter(p => p.name.trim()),
-        allowed_tools: d.allowed_tools,
-        authored: true, authoredBy: this.user.name.split(" ")[0].toLowerCase(),
-      });
-      this.showSaveSkill = false;
-      this.flash(`Skill "${d.name}" saved — it's now in the Skills menu.`);
+      try {
+        const r = await fetch("/skills", {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: d.name, description: d.description, instructions: d.instructions,
+            parameters: d.parameters.filter((p) => p.name && p.name.trim()),
+            allowed_tools: d.allowed_tools,
+          }),
+        });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `${r.status}`);
+          this.flash(`Couldn't save skill (${r.status}): ${detail.slice(0, 120)}`);
+          return;
+        }
+        const data = await r.json();
+        this.showSaveSkill = false;
+        this.flash(`Skill "${data.name}" saved — it's now in the Skills menu.`);
+        // Reflect in the local list immediately.
+        await this.loadSkills();
+      } catch (e) {
+        this.flash(`Network error: ${e.message || e}`);
+      }
     },
     slugify(s) {
       return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");

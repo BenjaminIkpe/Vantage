@@ -14,8 +14,11 @@ import uuid
 import redis as redis_lib
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-TTL_SECONDS = int(os.getenv("SESSION_TTL", "3600"))        # ~1h; refreshed each turn
+# Default 7 days so the sidebar holds a useful history (the UI's Today/Yesterday/Last-7-days
+# grouping). Per-turn refresh keeps active sessions alive indefinitely.
+TTL_SECONDS = int(os.getenv("SESSION_TTL", "604800"))
 MAX_MESSAGES = int(os.getenv("SESSION_MAX_MESSAGES", "20"))  # rolling cap (user+assistant)
+TITLE_MAX = 80                                               # chars; sidebar title truncation
 
 _client: redis_lib.Redis | None = None
 
@@ -130,3 +133,76 @@ def delete_auth_session(sid: str) -> None:
         _redis().delete(f"auth_session:{sid}")
     except Exception:
         pass
+
+
+# --- Per-user session listing for the chat-history sidebar ------------------------------
+# `user_sessions:{username}` is a sorted set: members are session ids, scores are the
+# most-recent-turn timestamps so we can render Today / Yesterday / Last 7 days by reading
+# the zset in reverse. The session's title (= the first user message, truncated) lives
+# at `session:{id}:title`. Both follow the same TTL as the conversation itself.
+
+
+def _now_ts() -> int:
+    import time
+    return int(time.time())
+
+
+def record_user_session(username: str, session_id: str, first_user_text: str | None = None) -> None:
+    """Index this session under the user (called from /ask on every turn). Sets the title
+    on the first turn only (subsequent calls leave it alone — title = original prompt)."""
+    if not username or not session_id:
+        return
+    try:
+        r = _redis()
+        zkey = f"user_sessions:{username}"
+        tkey = f"session:{session_id}:title"
+        ts = _now_ts()
+        r.zadd(zkey, {session_id: ts})
+        r.expire(zkey, TTL_SECONDS)
+        if first_user_text and not r.exists(tkey):
+            r.set(tkey, first_user_text[:TITLE_MAX], ex=TTL_SECONDS)
+        elif r.exists(tkey):
+            r.expire(tkey, TTL_SECONDS)
+    except Exception:
+        pass
+
+
+def user_sessions(username: str) -> list[dict]:
+    """List the user's sessions newest-first as `[{id, title, last_updated}]`."""
+    if not username:
+        return []
+    try:
+        r = _redis()
+        # zrevrange + WITHSCORES → [(id, score), ...]; redis-py with decode_responses=True
+        # returns strings + floats here.
+        rows = r.zrange(f"user_sessions:{username}", 0, -1, desc=True, withscores=True)
+        out = []
+        for sid, score in rows:
+            title = r.get(f"session:{sid}:title") or "(untitled)"
+            out.append({"id": sid, "title": title, "last_updated": int(score)})
+        return out
+    except Exception:
+        return []
+
+
+def user_owns_session(username: str, session_id: str) -> bool:
+    """Whether this session id is in the named user's index (access control for /sessions/{id})."""
+    if not username or not session_id:
+        return False
+    try:
+        return _redis().zscore(f"user_sessions:{username}", session_id) is not None
+    except Exception:
+        return False
+
+
+def delete_user_session(username: str, session_id: str) -> bool:
+    """Remove a session from the user's index and delete its data. Returns True if owned."""
+    if not user_owns_session(username, session_id):
+        return False
+    try:
+        r = _redis()
+        r.zrem(f"user_sessions:{username}", session_id)
+        r.delete(f"session:{session_id}", f"session:{session_id}:tools", f"session:{session_id}:title")
+        return True
+    except Exception:
+        return False
