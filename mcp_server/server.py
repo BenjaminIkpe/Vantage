@@ -27,6 +27,9 @@ from tools import (
     create_next_action,
     get_customer_profile,
     get_open_issues,
+    list_customers,
+    list_issues,
+    list_next_actions,
     summarise_issue_history,
     update_issue,
     update_next_action,
@@ -139,6 +142,75 @@ def _get_open_issues(name: str) -> dict:
 )
 def _summarise_issue_history(issue_id: int) -> dict:
     return summarise_issue_history(issue_id, _principal())
+
+
+# --- browse / list tools (read; all roles) ----------------------------------
+# Use these when the user wants to *explore* without naming a specific customer or id —
+# 'who are our customers', 'show me critical issues', 'what next actions are overdue'.
+# All paginated with sensible defaults; return total_count + has_more so the agent can
+# fetch the next page if the user asks.
+
+
+@mcp.tool(
+    name="list_customers",
+    description=(
+        "List customers across the platform with optional filters, paginated. Use this when "
+        "the user wants to BROWSE or EXPLORE customers without naming one — e.g. 'who are "
+        "our customers', 'show me Enterprise accounts', 'customers in Scotland', 'list my "
+        "portfolio'. Filters: `q` (partial name OR account_ref), `region`, `segment` "
+        "(SMB/Mid-Market/Enterprise), `tier` (standard/premium/strategic), `account_manager` "
+        "(partial display name). Returns customers sorted alphabetically by name, plus "
+        "`total_count` and `has_more` for pagination. Do not use when the user names a "
+        "specific customer — use get_customer_profile or get_open_issues instead."
+    ),
+)
+def _list_customers(q: str | None = None, region: str | None = None,
+                    segment: str | None = None, tier: str | None = None,
+                    account_manager: str | None = None,
+                    limit: int = 20, offset: int = 0) -> dict:
+    return list_customers(_principal(), q=q, region=region, segment=segment, tier=tier,
+                          account_manager=account_manager, limit=limit, offset=offset)
+
+
+@mcp.tool(
+    name="list_issues",
+    description=(
+        "List issues across ALL customers with optional filters, paginated. Use for "
+        "cross-customer triage and exploration — e.g. 'all critical open issues', 'my "
+        "open issues' (with assigned_to=user's name), 'integration backlog', 'pending "
+        "tickets'. Filters: `status` (open/in_progress/pending/resolved/closed, plus the "
+        "convenience value 'open' which matches any open-bucket value), `priority`, "
+        "`category`, `customer` (partial name), `assigned_to` (partial display name). "
+        "Sorted critical→low priority, then oldest-first. Returns issues with their "
+        "customer attached. Use get_open_issues instead when the user names a single "
+        "customer; use this when the customer is unspecified or it's a cross-customer query."
+    ),
+)
+def _list_issues(status: str | None = None, priority: str | None = None,
+                 category: str | None = None, customer: str | None = None,
+                 assigned_to: str | None = None,
+                 limit: int = 20, offset: int = 0) -> dict:
+    return list_issues(_principal(), status=status, priority=priority, category=category,
+                       customer=customer, assigned_to=assigned_to, limit=limit, offset=offset)
+
+
+@mcp.tool(
+    name="list_next_actions",
+    description=(
+        "List recorded next actions (admin directives) across all issues/customers, "
+        "paginated. Use for admin oversight — e.g. 'what next actions are overdue', "
+        "'show me open admin work', 'next actions Dana has created'. Filters: `status` "
+        "(open/done/cancelled), `overdue` (true → open items past their due_date), "
+        "`customer` (partial name), `created_by` (partial display name). Sorted by "
+        "status (open first) then due_date ascending."
+    ),
+)
+def _list_next_actions(status: str | None = None, overdue: bool = False,
+                       customer: str | None = None, created_by: str | None = None,
+                       limit: int = 20, offset: int = 0) -> dict:
+    return list_next_actions(_principal(), status=status, overdue=overdue,
+                             customer=customer, created_by=created_by,
+                             limit=limit, offset=offset)
 
 
 # --- write tools (RBAC-checked inside the tool; every attempt audited) -------
