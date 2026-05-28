@@ -2,7 +2,7 @@
 title: Build Log
 type: build-log
 status: active
-updated: 2026-05-27
+updated: 2026-05-28
 ---
 
 # Build Log
@@ -37,6 +37,7 @@ updated: 2026-05-27
 - ✅ **Agentic core working** — `POST /ask` runs a minimal Claude tool-calling loop (ADR-001) over `get_customer_profile`. Validated live: "Velocity"→grounded profile; "Lumen"→asks which (E2, no guess); "Zzzz"→not found (E1, no invention). Merged via PR #3.
 - ✅ First tool `get_customer_profile` (PR #2); CI on every PR + branch protection live.
 - ✅ Full stack integrated on `main`; auth gate; host pivot Azure→Codespaces.
+- ✅ **Data layer landed (PR #1, track/data → main)** — 5-table schema (customers, issues, issue_updates, next_actions, users) + the committed hybrid seed (12/40/132/14): Faker (seeded, pinned 40.19.1) for structure, Claude-authored text for issue descriptions + multi-update histories, deterministic + offline ([ADR-005](05-Decisions/ADR-005-seed-data.md)'s "no runtime LLM dependency"). Eval scenarios planted as data: hero (Velocity = High/Critical), twins (Lumen Commerce / Lumen Commerce Group, distinct account_ref+region), zero-open (Calm Waters), absent name (Zzzz). Data-ci pytest suite — 18 tests + a negative-control — guards every planted scenario, chronology, and that `seed.sql` is still in sync with its generator. Validated against a throwaway local Postgres before integration. Tour: [12-Data](12-Data.md).
 
 ### 2026-05-27
 - Repo + two parallel tracks; full design locked (ADR-001…006).
@@ -59,3 +60,4 @@ updated: 2026-05-27
 | 2026-05-28 | Skill engine + user authoring (Flow 1) | walked through the "what is a Skill" + two authoring UX flows before building; signed off generic runner + file-based storage; ran the full author→save→reuse loop on the Codespace | steered scope vs deadline (build generic, seed Escalation = the Must); kept authoring safe via the tool-whitelist + RBAC |
 | 2026-05-28 | Evals + README + observability | ran the 10-case harness on the live stack (10/10); reviewed the README against the brief's deliverables | asserted on deterministic trace not LLM prose; added latency to complete the observability ask |
 | 2026-05-27 | Write tools + RBAC denial | design sketch + sign-off (denial as structured status; slice write vs Redis); deterministic role×tool matrix + end-to-end /ask on the Codespace | insisted the agent must *attempt* the tool (no prompt self-gating) so the denial is genuinely tool-enforced; audit logs identifiers only |
+| 2026-05-27 | Data layer (schema + hybrid seed + data-ci) | read the design vault (04-Architecture, ADR-005) first; ran schema+seed in a throwaway PG cluster locally; wrote a pytest suite plus a negative-control that proves the assertions actually fail when a scenario is broken | shaped customers to specific eval scenarios (E1/E2/E3 + hero) instead of random data; pinned Faker so the determinism check stays meaningful; placed tests under db/tests/ to respect the data-track file ownership |
