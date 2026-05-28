@@ -130,10 +130,11 @@ def _get_open_issues(name: str) -> dict:
 @mcp.tool(
     name="summarise_issue_history",
     description=(
-        "Fetch one issue plus its full audit trail (every update, oldest first) by issue "
-        "id — use it to explain how an issue evolved or to ground an escalation summary. "
-        "Get the id from get_open_issues. Returns not_found for an unknown id. Summarise "
-        "only from the updates returned; never invent history."
+        "Fetch one issue plus its full audit trail (every update, oldest first) AND any "
+        "recorded next actions on it, by issue id. Use it to explain how an issue evolved, "
+        "to ground an escalation summary, or to find next-action ids before calling "
+        "update_next_action. Get the issue id from get_open_issues. Returns not_found for "
+        "an unknown id. Summarise only from what's returned; never invent history."
     ),
 )
 def _summarise_issue_history(issue_id: int) -> dict:
