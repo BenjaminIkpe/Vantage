@@ -2,7 +2,7 @@
 title: Scope — MoSCoW
 type: scope
 status: locked
-updated: 2026-05-27
+updated: 2026-05-28
 ---
 
 # Scope
@@ -34,7 +34,7 @@ updated: 2026-05-27
 - [ ] **Flow 2 — guided Skill authoring** (interview + role-aware suggestions): the app asks what the skill should do and suggests options based on the user's role. The stretch beyond Flow 1, best with the UI.
 - [ ] Second Redis use — caching customer lookups.
 - [ ] Streaming responses (demo polish).
-- [ ] Cross-account oversight listing tool for `admin` (e.g. "all high-risk accounts").
+- [ ] **Proactive admin briefing — `GET /briefing`** (admin-only). One call → a ranked digest across **all** customers: who's High/Critical and why (composing today's Escalation Summary skill across the fleet — the *system* picks accounts to brief, contrasting with story **S7** where the user picks 2-3), plus **cross-customer pattern detection** that no per-customer flow can produce (e.g. *"4 accounts hit webhook errors this week — likely platform"*). AI-drafted suggested next actions appear as advice in the text — no persistence, no draft-approval flow. Likely adds one new read tool (`get_high_risk_customers`, admin-only, RBAC at the boundary, same as the existing five — see [10-Scaling](10-Scaling.md) §Where it strains). **Out of scope:** scheduling (stays an endpoint, not a worker), persistent observation, draft → approve → route — captured in [11-Future](11-Future.md) as the natural Phase 2.
 
 ## Won't — this version (explicitly out, with reason)
 - Production-grade Keycloak — we run *real* Keycloak but a dev realm; hardening, single sign-on (SSO), refresh-token flows are out.
