@@ -61,6 +61,8 @@ async def ask(req: AskRequest, caller: Authed = Depends(authed)):
     inside each tool (ADR-002/003). The API itself holds no database access. Conversation
     context for the session is loaded from / saved to Redis (story X1), so follow-ups resolve.
     """
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="query must be a non-empty string")
     session_id = resolve_session_id(req.session_id)
     try:
         result = await run_agent(
