@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vantage — Acme Operations</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg:        'var(--bg)',
+            bg2:       'var(--bg-2)',
+            surface:   'var(--surface)',
+            surface2:  'var(--surface-2)',
+            line:      'var(--line)',
+            linesoft:  'var(--line-soft)',
+            text:      'var(--text)',
+            textsoft:  'var(--text-soft)',
+            textmuted: 'var(--text-muted)',
+            accent:    'var(--accent)',
+            accentsoft:'var(--accent-soft)',
+            accentedge:'var(--accent-edge)',
+            ok:        'var(--ok)',
+            warn:      'var(--warn)',
+            deny:      'var(--deny)',
+            denysoft:  'var(--deny-soft)',
+            denyedge:  'var(--deny-edge)',
+            run:       'var(--run)',
+          },
+          fontFamily: {
+            sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['Geist Mono', 'ui-monospace', 'monospace'],
+          },
+          fontSize: {
+            '2xs': ['10.5px', '14px'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    /* Theme tokens */
+    [data-theme="dark"] {
+      --bg:        oklch(0.155 0.008 60);
+      --bg-2:      oklch(0.14 0.008 60);
+      --surface:   oklch(0.185 0.008 60);
+      --surface-2: oklch(0.215 0.008 60);
+      --line:      oklch(0.30 0.008 60);
+      --line-soft: oklch(0.245 0.008 60);
+      --text:      oklch(0.94 0.005 80);
+      --text-soft: oklch(0.74 0.008 70);
+      --text-muted:oklch(0.58 0.008 70);
+      --accent:        oklch(0.68 0.13 42);
+      --accent-soft:   oklch(0.68 0.13 42 / 0.14);
+      --accent-edge:   oklch(0.68 0.13 42 / 0.34);
+      --accent-ink:    oklch(0.16 0.02 50);
+      --user-fill: oklch(0.225 0.012 50);
+      --ok:        oklch(0.74 0.11 155);
+      --warn:      oklch(0.80 0.13 75);
+      --deny:      oklch(0.72 0.16 25);
+      --deny-soft: oklch(0.68 0.16 25 / 0.12);
+      --deny-edge: oklch(0.68 0.16 25 / 0.36);
+      --run:       oklch(0.74 0.10 220);
+    }
+    [data-theme="light"] {
+      --bg:        oklch(0.985 0.005 80);
+      --bg-2:      oklch(0.97 0.005 80);
+      --surface:   oklch(0.955 0.005 80);
+      --surface-2: oklch(0.93 0.005 80);
+      --line:      oklch(0.82 0.008 80);
+      --line-soft: oklch(0.90 0.008 80);
+      --text:      oklch(0.20 0.008 80);
+      --text-soft: oklch(0.42 0.008 80);
+      --text-muted:oklch(0.55 0.008 80);
+      --accent:        oklch(0.55 0.15 42);
+      --accent-soft:   oklch(0.55 0.15 42 / 0.10);
+      --accent-edge:   oklch(0.55 0.15 42 / 0.30);
+      --accent-ink:    oklch(0.99 0.005 80);
+      --user-fill: oklch(0.93 0.012 50);
+      --ok:        oklch(0.50 0.13 155);
+      --warn:      oklch(0.55 0.15 70);
+      --deny:      oklch(0.50 0.18 25);
+      --deny-soft: oklch(0.50 0.18 25 / 0.08);
+      --deny-edge: oklch(0.50 0.18 25 / 0.36);
+      --run:       oklch(0.50 0.13 220);
+    }
+
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+    body { font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'ss01', 'cv11'; }
+    .mono, code, pre, kbd { font-family: 'Geist Mono', ui-monospace, monospace; }
+    [x-cloak] { display: none !important; }
+
+    /* Focus rings */
+    button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;
+    }
+
+    /* Markdown */
+    .md { line-height: 1.6; color: var(--text); }
+    .md > * + * { margin-top: 10px; }
+    .md p { margin: 0; }
+    .md h1, .md h2, .md h3 { font-weight: 600; letter-spacing: -0.005em; }
+    .md h2 { font-size: 15px; margin-top: 20px; }
+    .md h3 { font-size: 13px; margin-top: 18px; margin-bottom: -2px; }
+    .md strong { color: var(--text); font-weight: 600; }
+    .md em { color: var(--text-soft); font-style: italic; }
+    .md code { font-size: 12.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-soft); color: var(--text); }
+    .md pre { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; padding: 11px 13px; font-size: 12px; color: var(--text); white-space: pre; overflow-x: auto; line-height: 1.5; }
+    .md pre code { background: transparent; border: 0; padding: 0; font-size: inherit; }
+    .md ul { margin: 0; padding-left: 18px; }
+    .md ul li { margin: 4px 0; }
+    .md table { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+    .md th { text-align: left; font-weight: 500; color: var(--text-muted); background: var(--surface); padding: 7px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--line-soft); }
+    .md td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); color: var(--text-soft); }
+    .md tr:last-child td { border-bottom: none; }
+    .md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+    /* Caret */
+    .caret { display: inline-block; width: 2px; height: 1.05em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: caret 1s steps(1) infinite; }
+    @keyframes caret { 50% { opacity: 0; } }
+    .pulse { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+    .spin { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; }
+      .caret { animation: none; opacity: 1; }
+    }
+
+    /* Scrollbars — subtle */
+    *::-webkit-scrollbar { width: 10px; height: 10px; }
+    *::-webkit-scrollbar-thumb { background: var(--line-soft); border-radius: 6px; border: 2px solid var(--bg); }
+    *::-webkit-scrollbar-thumb:hover { background: var(--line); }
+    *::-webkit-scrollbar-track { background: transparent; }
+
+    textarea { field-sizing: content; }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body x-data="vantage()" x-init="init()" x-cloak class="h-full">
+  <div class="grid h-full" style="grid-template-columns: 280px 1fr;">
+
+    <!-- ░░ SIDEBAR ░░ -->
+    <aside class="bg-bg2 border-r border-linesoft flex flex-col min-h-0">
+      <!-- Brand -->
+      <div class="flex items-center gap-2.5 px-4 py-3.5 border-b border-linesoft">
+        <div class="w-[22px] h-[22px] rounded-md grid place-items-center font-bold text-xs"
+             style="background: linear-gradient(135deg, var(--accent), oklch(0.78 0.12 55)); color: var(--accent-ink);">V</div>
+        <div class="font-semibold tracking-tight">Vantage</div>
+        <div class="ml-auto text-2xs text-textmuted">Acme Ops</div>
+      </div>
+
+      <!-- New chat -->
+      <button @click="newChat()"
+              class="mx-3 mt-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-linesoft hover:bg-surface2 text-sm font-medium">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span>New chat</span>
+        <span class="ml-auto text-2xs text-textmuted mono">⌘N</span>
+      </button>
+
+      <!-- Search -->
+      <div class="mx-3 mb-3 relative">
+        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-textmuted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input x-model="search" placeholder="Search chats…"
+               class="w-full bg-transparent border border-linesoft rounded-lg pl-8 pr-3 py-1.5 text-[13px] placeholder:text-textmuted outline-none focus:border-accentedge" />
+      </div>
+
+      <!-- Chat groups -->
+      <div class="flex-1 overflow-y-auto overflow-x-hidden pb-2 min-h-0">
+        <template x-for="group in chatGroups" :key="group.label">
+          <div>
+            <div class="px-4 pt-3 pb-1 text-2xs uppercase tracking-wider text-textmuted" x-text="group.label"></div>
+            <div class="px-2 flex flex-col gap-px">
+              <template x-for="c in group.items" :key="c.id">
+                <button @click="openChat(c.id)"
+                  :class="c.id === activeChatId
+                    ? 'bg-accentsoft border border-accentedge px-[9px] py-[7px]'
+                    : 'border border-transparent hover:bg-surface px-2.5 py-2'"
+                  class="w-full text-left rounded-md flex flex-col gap-0.5">
+                  <div class="text-[13px] truncate" x-text="c.title || 'New chat'"></div>
+                  <div class="text-2xs"
+                       :class="c.id === activeChatId ? 'text-[oklch(0.78_0.10_45)]' : 'text-textmuted'"
+                       x-text="c.time"></div>
+                </button>
+              </template>
+            </div>
+          </div>
+        </template>
+        <div x-show="chats.length === 0" class="px-4 py-6 text-[12.5px] text-textsoft text-center">
+          No chats yet — start one with a prompt below.
+        </div>
+      </div>
+
+      <!-- User foot -->
+      <div class="relative border-t border-linesoft px-3 py-2.5 flex items-center gap-2.5"
+           @click.outside="showUserMenu = false">
+        <div class="w-[26px] h-[26px] rounded-full grid place-items-center font-semibold text-[11px]"
+             style="background: oklch(0.45 0.05 50);" x-text="user.initials"></div>
+        <div class="min-w-0 flex-1">
+          <div class="text-[13px] font-medium truncate" x-text="user.name"></div>
+          <div class="text-2xs text-textmuted truncate mono" x-text="user.email"></div>
+        </div>
+        <button @click="showUserMenu = !showUserMenu" class="text-textmuted hover:text-text p-1.5 rounded-md hover:bg-surface" aria-label="Account menu">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
+        </button>
+
+        <!-- User menu popover -->
+        <div x-show="showUserMenu" x-transition.opacity.duration.100ms
+             class="absolute bottom-full right-2 mb-2 w-[260px] bg-bg border border-line rounded-lg p-2 z-30 shadow-2xl"
+             style="box-shadow: 0 12px 32px rgba(0,0,0,0.4);">
+          <div class="px-2 pt-1 pb-2 text-2xs uppercase tracking-wider text-textmuted mono">Switch role (demo)</div>
+          <template x-for="r in ['sales','support','admin']" :key="r">
+            <button @click="setRole(r); showUserMenu = false"
+              class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface text-[13px]"
+              :class="r === role ? 'bg-surface' : ''">
+              <span class="w-1.5 h-1.5 rounded-full"
+                    :style="r === 'sales' ? 'background: var(--ok);' : r === 'support' ? 'background: var(--run);' : 'background: var(--accent);'"></span>
+              <span x-text="roleLabel(r)"></span>
+              <span class="ml-auto text-2xs text-textmuted mono" x-text="roleSubLabel(r)"></span>
+              <svg x-show="r === role" class="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"/></svg>
+            </button>
+          </template>
+          <div class="my-1.5 h-px bg-linesoft"></div>
+          <button @click="toggleTheme(); showUserMenu = false" class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface text-[13px]">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
+            <span x-text="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"></span>
+          </button>
+          <button class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface text-[13px] text-textsoft">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4v16h-4"/><path d="M3 12h12M11 8l4 4-4 4"/></svg>
+            <span>Sign out</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ░░ MAIN ░░ -->
+    <section class="grid min-w-0" style="grid-template-rows: 52px 1fr auto;">
+
+      <!-- Header -->
+      <header class="flex items-center gap-3 px-5 border-b border-linesoft bg-bg min-w-0">
+        <div class="flex items-center gap-2 text-[13px] text-textsoft min-w-0">
+          <span class="text-textmuted">Vantage</span>
+          <span class="text-line">/</span>
+          <span class="font-medium text-text truncate" x-text="activeChat?.title || 'New chat'"></span>
+        </div>
+        <div class="flex-1"></div>
+
+        <!-- Role badge -->
+        <span class="mono text-2xs uppercase tracking-wider px-2 py-[3px] rounded-md border font-medium flex items-center gap-1.5"
+              :class="roleBadgeClass(role)"
+              :title="`Signed in as ${user.name} — ${roleSubLabel(role)}`">
+          <span class="w-1.5 h-1.5 rounded-full" :style="roleDotStyle(role)"></span>
+          <span x-text="roleLabel(role)"></span>
+        </span>
+
+        <!-- Save as skill (visible after a productive chat) -->
+        <button x-show="messages.filter(m => m.role==='assistant' && !m.errored && !m.streaming).length >= 1 && messages.length >= 3"
+                @click="openSaveSkill()"
+                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-linesoft text-textsoft hover:bg-surface hover:text-text text-[13px]">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.5 5.5L20 10l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-1.5L12 3z"/></svg>
+          <span>Save as skill</span>
+        </button>
+
+        <!-- Skills menu -->
+        <button @click="openSkillsMenu()"
+                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-textsoft hover:bg-surface hover:text-text text-[13px] border border-transparent">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/><path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8L16.5 18.5l1.8-.7L19 16z"/></svg>
+          <span>Skills</span>
+          <span class="text-2xs text-textmuted mono ml-1">⌘K</span>
+        </button>
+      </header>
+
+      <!-- Thread -->
+      <div class="overflow-y-auto min-h-0" x-ref="thread">
+        <!-- Empty state -->
+        <div x-show="messages.length === 0" class="max-w-[560px] mx-auto mt-14 px-7 text-center flex flex-col items-center gap-4">
+          <div class="w-12 h-12 rounded-xl grid place-items-center font-bold text-[22px] mono"
+               style="background: linear-gradient(135deg, var(--accent), oklch(0.78 0.12 55)); color: var(--accent-ink);">V</div>
+          <div>
+            <div class="text-[19px] font-semibold tracking-tight" x-text="`Welcome back, ${user.name.split(' ')[0]}.`"></div>
+            <div class="text-[13.5px] text-textsoft mt-1.5 leading-relaxed max-w-[480px] mx-auto">
+              Ask Vantage about a customer, an issue, or a next action. Every answer is grounded in Acme's records — the trace shows exactly which tools were called.
+            </div>
+          </div>
+          <div class="flex flex-col gap-2 w-full max-w-[520px] mt-2">
+            <template x-for="(s, i) in starterChips" :key="i">
+              <button @click="ask(s)"
+                class="text-left px-3.5 py-2.5 rounded-lg bg-surface border border-linesoft hover:bg-surface2 hover:border-line text-[13px] flex items-center gap-2.5">
+                <svg class="w-3.5 h-3.5 text-accent flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/><path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8L16.5 18.5l1.8-.7L19 16z"/></svg>
+                <span x-html="formatChip(s)"></span>
+              </button>
+            </template>
+          </div>
+          <div class="text-2xs text-textmuted mono mt-2">
+            signed in as <span class="text-textsoft" x-text="user.email"></span> · <span x-text="roleSubLabel(role)"></span>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="max-w-[760px] mx-auto px-6 pt-4 pb-2 flex flex-col gap-6" aria-live="polite" aria-relevant="additions text">
+          <template x-for="(msg, idx) in messages" :key="msg.id">
+            <div>
+              <!-- USER -->
+              <template x-if="msg.role === 'user'">
+                <div class="flex justify-end">
+                  <div class="max-w-[560px]">
+                    <div class="text-2xs uppercase tracking-wider text-textmuted mono mb-1.5 text-right" x-text="user.name"></div>
+                    <div class="rounded-[10px] px-3.5 py-2.5 leading-relaxed border border-linesoft" style="background: var(--user-fill);" x-text="msg.text"></div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- ASSISTANT -->
+              <template x-if="msg.role === 'assistant'">
+                <div>
+                  <div class="text-2xs uppercase tracking-wider text-textmuted mono mb-1.5 flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="msg.streaming ? 'pulse' : ''" style="background: var(--accent);"></span>
+                    Vantage
+                  </div>
+
+                  <!-- Body -->
+                  <div class="max-w-[720px]">
+                    <!-- Markdown content -->
+                    <div class="md" x-html="renderMd(msg.md || '') + (msg.streaming && msg.md ? '<span class=\'caret\'></span>' : '')"></div>
+
+                    <!-- Tool indicator (only while streaming, between tool calls) -->
+                    <template x-if="msg.currentTool">
+                      <div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-linesoft rounded-lg mono text-[11.5px] text-textsoft">
+                        <span class="w-2.5 h-2.5 rounded-full border-[1.5px] border-line spin" style="border-top-color: var(--accent);"></span>
+                        <span class="text-textmuted">→ calling</span>
+                        <span class="text-text" x-text="msg.currentTool.tool"></span>
+                        <span class="text-textmuted" x-text="'(' + msg.currentTool.argPreview + ')…'"></span>
+                      </div>
+                    </template>
+
+                    <!-- Error -->
+                    <template x-if="msg.errored">
+                      <div class="mt-3 border border-denyedge rounded-lg p-3 grid items-start gap-3" style="background: var(--deny-soft); grid-template-columns: auto 1fr auto;">
+                        <div class="mt-0.5" style="color: var(--deny);">
+                          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v0.1"/></svg>
+                        </div>
+                        <div class="min-w-0">
+                          <div class="text-[13.5px] font-semibold text-text">Something went wrong calling the agent.</div>
+                          <div class="text-[12.5px] text-textsoft mt-0.5 leading-snug" x-html="msg.errored"></div>
+                        </div>
+                        <button @click="retryMessage(idx)" class="px-3 py-1.5 rounded-md text-[12.5px] flex items-center gap-1.5" style="color: var(--deny); border: 1px solid var(--deny-edge);">
+                          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 3 6.7"/><path d="M3 21v-5h5"/></svg>
+                          Retry
+                        </button>
+                      </div>
+                    </template>
+
+                    <!-- Trace expander -->
+                    <template x-if="(msg.trace && msg.trace.length) || msg.streaming">
+                      <div class="mt-3 border border-linesoft rounded-lg overflow-hidden" style="background: oklch(0.17 0.008 60);" x-data="{ open: msg.deniedTrace ? true : false }" :data-open="open">
+                        <button @click="open = !open" class="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-textsoft hover:bg-surface text-left">
+                          <svg class="w-3.5 h-3.5 text-textmuted transition-transform" :class="open ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+                          <span class="mono text-[11.5px] text-textmuted">
+                            <template x-if="msg.streaming && (!msg.trace || msg.trace.length === 0)">
+                              <span><span class="w-1.5 h-1.5 rounded-full inline-block mr-1.5 pulse align-middle" style="background: var(--run);"></span>thinking…</span>
+                            </template>
+                            <template x-if="msg.trace && msg.trace.length > 0">
+                              <span>
+                                <span class="text-textsoft font-medium" x-text="msg.trace.length + (msg.trace.length === 1 ? ' tool' : ' tools')"></span>
+                                <span> · </span>
+                                <span x-text="((msg.elapsedMs || 0) / 1000).toFixed(1) + 's'"></span>
+                                <template x-if="msg.trace.some(c => c.status === 'denied')">
+                                  <span> · <span style="color: var(--deny);" x-text="msg.trace.filter(c => c.status === 'denied').length + ' denied'"></span></span>
+                                </template>
+                              </span>
+                            </template>
+                          </span>
+                          <span class="ml-auto mono text-2xs text-textmuted" x-text="open ? 'hide' : 'show trace'"></span>
+                        </button>
+                        <div x-show="open && msg.trace && msg.trace.length > 0" class="border-t border-linesoft py-1.5">
+                          <template x-for="(call, i) in msg.trace" :key="i">
+                            <div class="grid items-center gap-2.5 px-3.5 py-1.5 mono text-[11.5px]" style="grid-template-columns: 14px 1fr auto;">
+                              <span class="text-textmuted">→</span>
+                              <span class="truncate min-w-0">
+                                <span class="text-text" x-text="call.tool"></span><span class="text-textmuted">(</span><span style="color: oklch(0.78 0.06 45);" x-text="call.argPreview"></span><span class="text-textmuted">)</span>
+                              </span>
+                              <span class="flex items-center gap-2">
+                                <span class="px-1.5 py-px rounded text-2xs"
+                                      :class="traceStatusClass(call.status)" x-text="call.status"></span>
+                                <span class="text-textmuted text-[11px]" x-text="call.ms + 'ms'"></span>
+                              </span>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+          <div x-ref="threadEnd" class="h-2"></div>
+        </div>
+      </div>
+
+      <!-- Input bar -->
+      <div class="border-t border-linesoft px-5 py-3.5 bg-bg">
+        <div class="max-w-[760px] mx-auto border border-line rounded-xl bg-surface px-3 py-2.5 focus-within:border-accentedge focus-within:shadow-[0_0_0_3px_var(--accent-soft)] transition-shadow">
+          <textarea x-model="input" rows="1"
+                    @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); send(); }"
+                    :disabled="isStreaming"
+                    placeholder="Ask anything about a customer, an issue, or a next action…"
+                    class="w-full bg-transparent border-0 outline-0 resize-none text-text placeholder:text-textmuted min-h-[24px] max-h-[160px] text-[14px] leading-snug"></textarea>
+          <div class="flex items-center gap-2.5 pt-1">
+            <span class="text-2xs text-textmuted mono">Enter ↵ to send · Shift+Enter for newline</span>
+            <button @click="isStreaming ? cancel() : send()"
+                    :disabled="!input.trim() && !isStreaming"
+                    class="ml-auto px-3 py-1.5 rounded-lg font-medium text-[13px] flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    :class="isStreaming ? 'bg-surface2 text-text border border-line' : 'bg-accent'"
+                    :style="!isStreaming ? 'color: var(--accent-ink);' : ''">
+              <template x-if="!isStreaming">
+                <span class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l14-7-5 16-3-7-6-2z"/></svg>
+                  Send
+                </span>
+              </template>
+              <template x-if="isStreaming">
+                <span class="flex items-center gap-1.5">
+                  <span class="w-2.5 h-2.5 bg-text rounded-sm"></span>
+                  Stop
+                </span>
+              </template>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ░░ SKILLS MENU (overlay) ░░ -->
+  <div x-show="showSkillsMenu" x-cloak x-transition.opacity.duration.100ms
+       @click.self="showSkillsMenu = false; activeSkill = null"
+       @keydown.escape.window="showSkillsMenu = false; activeSkill = null"
+       class="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] flex items-start justify-center pt-[14vh]">
+    <div class="w-[460px] bg-bg2 border border-line rounded-xl shadow-2xl overflow-hidden"
+         style="box-shadow: 0 24px 60px rgba(0,0,0,0.5);"
+         @click.stop>
+      <template x-if="!activeSkill">
+        <div>
+          <div class="px-3 pt-3 pb-2.5 border-b border-linesoft">
+            <input x-model="skillsSearch" x-init="$nextTick(() => $el.focus())"
+                   placeholder="Search skills…"
+                   class="w-full bg-surface border border-linesoft rounded-md px-3 py-2 text-[13px] outline-none focus:border-accentedge" />
+          </div>
+          <div class="p-1.5 max-h-[420px] overflow-y-auto">
+            <template x-for="(s, i) in filteredSkills" :key="s.name">
+              <button @click="selectSkill(s)"
+                class="w-full flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-surface text-left">
+                <div class="w-7 h-7 rounded-md grid place-items-center flex-none"
+                     style="background: var(--surface-2); color: var(--accent);">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/></svg>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-[13px] font-medium">
+                    <span x-text="s.name"></span>
+                    <span class="mono text-2xs text-textmuted ml-1.5" x-text="s.authored ? 'authored · ' + s.authoredBy : 'seeded'"></span>
+                  </div>
+                  <div class="text-[12px] text-textsoft mt-0.5 leading-snug" x-text="s.description"></div>
+                </div>
+              </button>
+            </template>
+            <div x-show="filteredSkills.length === 0" class="px-3 py-4 text-[12.5px] text-textmuted">No skills match.</div>
+          </div>
+          <div class="flex items-center gap-3 px-3 py-2 border-t border-linesoft text-2xs text-textmuted mono">
+            <span>↑↓ navigate</span><span>↵ select</span><span class="ml-auto">esc to close</span>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="activeSkill">
+        <div class="p-4">
+          <div class="text-[14px] font-semibold flex items-center gap-2">
+            <span x-text="activeSkill.name"></span>
+            <span class="mono text-2xs text-textmuted">/ skill</span>
+          </div>
+          <div class="text-[12.5px] text-textsoft mt-1 leading-relaxed" x-text="activeSkill.description"></div>
+          <div class="mt-4 space-y-3">
+            <template x-for="p in activeSkill.parameters" :key="p.name">
+              <div>
+                <label class="block text-2xs uppercase tracking-wider text-textmuted mono mb-1">
+                  <span x-text="p.name"></span> <span x-show="p.required" style="color: var(--deny);">*</span>
+                </label>
+                <input x-model="skillParams[p.name]"
+                       class="w-full bg-surface border border-linesoft rounded-md px-2.5 py-2 text-[13px] outline-none focus:border-accentedge focus:shadow-[0_0_0_3px_var(--accent-soft)]" />
+                <div class="text-2xs text-textmuted mt-1" x-text="p.description"></div>
+              </div>
+            </template>
+          </div>
+          <div class="mt-4 px-2.5 py-2 border border-linesoft rounded-md flex items-center gap-2 text-2xs text-textmuted">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v0.1"/></svg>
+            Restricted to: <span class="mono text-textsoft" x-text="activeSkill.allowed_tools.join(', ')"></span>
+          </div>
+          <div class="mt-4 flex gap-2 justify-end">
+            <button @click="activeSkill = null" class="px-3 py-1.5 rounded-md text-[13px] text-textsoft hover:bg-surface hover:text-text">Back</button>
+            <button @click="runSkill()" class="px-3 py-1.5 rounded-md text-[13px] font-medium flex items-center gap-1.5"
+                    style="background: var(--accent); color: var(--accent-ink);">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/></svg>
+              Run skill
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ░░ SAVE AS SKILL MODAL ░░ -->
+  <div x-show="showSaveSkill" x-cloak x-transition.opacity.duration.100ms
+       @click.self="showSaveSkill = false"
+       @keydown.escape.window="showSaveSkill = false"
+       class="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] flex items-start justify-center pt-[10vh]">
+    <div class="w-[560px] bg-bg2 border border-line rounded-xl shadow-2xl"
+         style="box-shadow: 0 24px 60px rgba(0,0,0,0.55);" @click.stop>
+      <div class="px-5 pt-4 pb-3 flex items-center gap-2">
+        <h2 class="text-[16px] font-semibold">Save this chat as a skill</h2>
+        <span class="mono text-2xs uppercase tracking-wider px-1.5 py-0.5 border border-linesoft rounded text-textmuted">DRAFT</span>
+        <button @click="showSaveSkill = false" class="ml-auto p-1 rounded text-textmuted hover:text-text hover:bg-surface" aria-label="Close">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
+        </button>
+      </div>
+      <div class="px-5 pb-2 text-[12.5px] text-textsoft leading-relaxed">
+        Vantage drafted a reusable skill from this conversation. Review the name, description and parameters — the tool whitelist is set to exactly what was used so the skill can never exceed your role's permissions.
+      </div>
+      <div class="px-5 py-3 space-y-3">
+        <div>
+          <label class="block text-2xs uppercase tracking-wider text-textmuted mono mb-1.5">Skill name</label>
+          <input x-model="skillDraft.name" class="w-full mono bg-surface border border-linesoft rounded-md px-2.5 py-2 text-[13px] outline-none focus:border-accentedge focus:shadow-[0_0_0_3px_var(--accent-soft)]" />
+        </div>
+        <div>
+          <label class="block text-2xs uppercase tracking-wider text-textmuted mono mb-1.5">One-line description</label>
+          <input x-model="skillDraft.description" class="w-full bg-surface border border-linesoft rounded-md px-2.5 py-2 text-[13px] outline-none focus:border-accentedge focus:shadow-[0_0_0_3px_var(--accent-soft)]" />
+        </div>
+        <div>
+          <label class="block text-2xs uppercase tracking-wider text-textmuted mono mb-1.5">Instructions (generalised)</label>
+          <textarea x-model="skillDraft.instructions" rows="5" class="w-full bg-surface border border-linesoft rounded-md px-2.5 py-2 text-[13px] outline-none focus:border-accentedge resize-y font-sans"></textarea>
+        </div>
+        <div>
+          <label class="block text-2xs uppercase tracking-wider text-textmuted mono mb-1.5">Parameters</label>
+          <div class="space-y-1.5">
+            <template x-for="(p, i) in skillDraft.parameters" :key="i">
+              <div class="grid items-center gap-1.5" style="grid-template-columns: 1fr 1.6fr auto;">
+                <input x-model="p.name" placeholder="name" class="mono bg-surface border border-linesoft rounded-md px-2.5 py-1.5 text-[12px] outline-none focus:border-accentedge" />
+                <input x-model="p.description" placeholder="description" class="bg-surface border border-linesoft rounded-md px-2.5 py-1.5 text-[12px] outline-none focus:border-accentedge" />
+                <button @click="skillDraft.parameters.splice(i, 1)" class="text-textmuted hover:text-text px-2">×</button>
+              </div>
+            </template>
+            <button @click="skillDraft.parameters.push({name: '', description: '', required: true})" class="text-2xs mono text-textmuted hover:text-text">+ add parameter</button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-2xs uppercase tracking-wider text-textmuted mono mb-1.5">Tool whitelist (from this session)</label>
+          <div class="flex flex-wrap gap-1.5 px-2.5 py-2 bg-surface border border-linesoft rounded-md">
+            <template x-for="t in skillDraft.allowed_tools" :key="t">
+              <span class="mono text-2xs px-2 py-0.5 rounded bg-bg border border-linesoft text-textsoft" x-text="t"></span>
+            </template>
+            <span x-show="skillDraft.allowed_tools.length === 0" class="text-textmuted text-2xs">— no writes were used in this chat —</span>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2.5 px-5 py-3.5 border-t border-linesoft">
+        <div class="text-2xs text-textmuted flex items-center gap-1.5 mr-auto">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v0.1"/></svg>
+          A skill can never exceed your role's permissions.
+        </div>
+        <button @click="showSaveSkill = false" class="px-3 py-1.5 rounded-md text-[13px] text-textsoft hover:bg-surface hover:text-text">Cancel</button>
+        <button @click="saveSkillFromDraft()" class="px-3 py-1.5 rounded-md text-[13px] font-medium flex items-center gap-1.5"
+                style="background: var(--accent); color: var(--accent-ink);">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"/></svg>
+          Save skill
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ TOAST ░░ -->
+  <div x-show="toast" x-transition x-cloak class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50">
+    <div class="bg-bg2 border border-line rounded-lg px-3.5 py-2 text-[13px] flex items-center gap-2.5 shadow-xl"
+         style="box-shadow: 0 12px 32px rgba(0,0,0,0.4);">
+      <span class="w-1.5 h-1.5 rounded-full" style="background: var(--ok);"></span>
+      <span x-text="toast"></span>
+    </div>
+  </div>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>
