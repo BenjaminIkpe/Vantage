@@ -95,14 +95,16 @@ def get_open_issues(name: str, principal: Principal) -> dict:
 
 
 def summarise_issue_history(issue_id: int, principal: Principal) -> dict:
-    """Return an issue plus its full audit trail, oldest update first.
+    """Return an issue plus its full audit trail AND any recorded next actions on it.
 
-    The *tool* returns the grounded history; the agent does the summarising — so the
-    summary is always anchored to real updates, never invented. Any authenticated
-    role may read.
+    The *tool* returns the grounded record; the agent does the summarising — so the
+    summary is always anchored to real updates and real directives, never invented.
+    Returning next actions here is the read path for them (A1 "visible on read") and
+    lets the agent discover their ids to drive update_next_action. Any authenticated
+    role may read (the write boundary is admin-only; reading the issue's record is open).
 
     Returns one of:
-      {"status": "found", "issue": {...}, "updates": [{author, body, update_type, created_at}, ...]}
+      {"status": "found", "issue": {...}, "updates": [...], "next_actions": [...]}
       {"status": "not_found", "issue_id": id}
     """
     issue = query(
@@ -131,7 +133,18 @@ def summarise_issue_history(issue_id: int, principal: Principal) -> dict:
         """,
         (issue_id,),
     )
-    return {"status": "found", "issue": issue[0], "updates": updates}
+    next_actions = query(
+        """
+        SELECT na.id, na.description, na.due_date, na.status,
+               na.created_at, na.updated_at, u.display_name AS created_by
+        FROM next_actions na
+        LEFT JOIN users u ON u.id = na.created_by_id
+        WHERE na.issue_id = %s
+        ORDER BY na.created_at ASC
+        """,
+        (issue_id,),
+    )
+    return {"status": "found", "issue": issue[0], "updates": updates, "next_actions": next_actions}
 
 
 # --- write tools (RBAC-checked) ----------------------------------------------
