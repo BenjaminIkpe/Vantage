@@ -65,13 +65,13 @@ Open **<http://localhost:8000/>** in a browser. Single-page chat (Alpine.js + Ta
 ```bash
 TOKEN=$(curl -s http://localhost:8080/realms/vantage/protocol/openid-connect/token \
   -d grant_type=password -d client_id=vantage-api -d client_secret=vantage-secret \
-  -d username=support -d password=support | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+  -d username=marcus.webb -d password=marcus | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 
 curl -s -X POST http://localhost:8000/ask -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"query":"Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action."}'
 ```
-Dev users: `sales`/`sales`, `support`/`support`, `admin-user`/`admin`.
+Dev users (persona names from the vault stories): `priya.nair`/`priya` (sales), `marcus.webb`/`marcus` (support), `dana.okafor`/`dana` (admin).
 
 ### Endpoints
 - `POST /ask` `{query, session_id?}` — ask the agent; returns `{answer, trace, elapsed_ms, session_id}`. Reuse `session_id` for multi-turn.

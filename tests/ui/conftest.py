@@ -12,9 +12,12 @@ BASE_URL = os.environ.get("VANTAGE_URL", "http://localhost:8000")
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://localhost:8080")
 
 USERS = {
-    "sales":   ("sales",        "sales",   "sales_user"),
-    "support": ("support",      "support", "support_user"),
-    "admin":   ("admin-user",   "admin",   "admin"),
+    # role-label → (keycloak_username, password, realm_role). The persona usernames
+    # (Priya/Marcus/Dana) match the seed personas in Vantage-vault/02-User-Stories.md so
+    # the sidebar shows real names; passwords are the first name for demo discoverability.
+    "sales":   ("priya.nair",   "priya",  "sales_user"),
+    "support": ("marcus.webb",  "marcus", "support_user"),
+    "admin":   ("dana.okafor",  "dana",   "admin"),
 }
 
 

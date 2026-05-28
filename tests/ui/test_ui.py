@@ -186,7 +186,7 @@ class TestStreaming:
         wait_for_streaming_done(page_support, timeout=90)
         # After streaming, the expander button shows 'show thinking' (collapsed) or 'hide'
         # (still expanded by user). Either label is fine — just confirm the expander rendered.
-        page_support.wait_for_selector("text=/show thinking|hide thinking|hide$|show trace/", timeout=5_000)
+        page_support.wait_for_selector("text=/show thinking|^hide$/", timeout=5_000)
 
     def test_elapsed_ms_displayed(self, page_support: Page):
         send_message(page_support, "Open issues for Velocity Marketplace?")

@@ -6,9 +6,12 @@ from playwright.sync_api import Page, expect
 BASE_URL = "http://localhost:8000"
 
 USERS = {
-    "sales":   ("sales",      "sales"),
-    "support": ("support",    "support"),
-    "admin":   ("admin-user", "admin"),
+    # role-label → (keycloak_username, password). Renamed to the persona usernames the
+    # vault stories use (Priya / Marcus / Dana); kept in sync with tests/ui/conftest.py
+    # and the realm export.
+    "sales":   ("priya.nair",  "priya"),
+    "support": ("marcus.webb", "marcus"),
+    "admin":   ("dana.okafor", "dana"),
 }
 
 # CSS / role-based selectors used by multiple tests.

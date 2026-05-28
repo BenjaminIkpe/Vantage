@@ -25,13 +25,19 @@ TOKEN_URL = os.getenv(
     "KEYCLOAK_TOKEN_URL",
     "http://localhost:8080/realms/vantage/protocol/openid-connect/token",
 )
-USERS = {"sales": "sales", "support": "support", "admin": "admin-user"}
+# role → (keycloak_username, password). Persona renames; see eval/run_evals.py for context.
+USERS = {
+    "sales":   ("priya.nair",  "priya"),
+    "support": ("marcus.webb", "marcus"),
+    "admin":   ("dana.okafor", "dana"),
+}
 
 
 def token(role):
+    username, password = USERS[role]
     data = urllib.parse.urlencode({
         "grant_type": "password", "client_id": "vantage-api", "client_secret": "vantage-secret",
-        "username": USERS[role], "password": role,
+        "username": username, "password": password,
     }).encode()
     with urllib.request.urlopen(TOKEN_URL, data=data) as r:
         return json.loads(r.read())["access_token"]

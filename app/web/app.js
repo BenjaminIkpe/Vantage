@@ -339,12 +339,22 @@ window.vantage = function () {
     role: "admin",   // active-role key the UI binds to; reset from /auth/whoami
     get user() {
       if (this.me) {
-        const initials = (this.me.username || "?").slice(0, 2).toUpperCase();
-        return { name: this.me.username, initials, email: `${this.me.username}@acme.test` };
+        // Persona usernames are `first.last` (priya.nair, marcus.webb, dana.okafor) — split
+        // on the dot and Title-Case each part so the sidebar shows "Marcus Webb", not
+        // "marcus.webb". Falls back to the raw username for any non-conforming login.
+        const u = this.me.username || "?";
+        const parts = u.split(".");
+        const name = parts.length >= 2
+          ? parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(" ")
+          : u;
+        const initials = parts.length >= 2
+          ? (parts[0][0] + parts[1][0]).toUpperCase()
+          : u.slice(0, 2).toUpperCase();
+        return { name, initials, email: this.me.email || `${u}@acme.test` };
       }
-      return { sales: { name: "Priya Nair", initials: "PN", email: "sales@acme.test" },
-               support: { name: "Marcus Webb", initials: "MW", email: "support@acme.test" },
-               admin: { name: "Dana Okafor", initials: "DO", email: "admin@acme.test" }
+      return { sales: { name: "Priya Nair", initials: "PN", email: "priya.nair@acme.test" },
+               support: { name: "Marcus Webb", initials: "MW", email: "marcus.webb@acme.test" },
+               admin: { name: "Dana Okafor", initials: "DO", email: "dana.okafor@acme.test" }
              }[this.role];
     },
 
@@ -469,17 +479,35 @@ window.vantage = function () {
         const r = await fetch("/sessions", { credentials: "include" });
         if (!r.ok) throw new Error(`sessions ${r.status}`);
         const data = await r.json();
-        // Map server shape {id, title, last_updated} → UI shape used by the sidebar.
-        this.chats = (data.sessions || []).map((s) => ({
-          id: s.id,
-          title: s.title,
-          time: relativeTime(s.last_updated),
-          group: bucketTime(s.last_updated),
-          messages: [],   // loaded lazily when the chat is opened
-          loaded: false,
-        }));
+        // MERGE, do not replace — wholesale-replacing this.chats wipes in-memory messages
+        // for any chat that just finished streaming, and the answer appears to "vanish"
+        // until the user switches chats and triggers a refetch. We keep existing objects
+        // by id (preserving their .messages + .loaded), add any new ids from the server,
+        // and drop any ids the server no longer knows about.
+        const byId = new Map(this.chats.map((c) => [c.id, c]));
+        const merged = (data.sessions || []).map((s) => {
+          const existing = byId.get(s.id);
+          if (existing) {
+            existing.title = s.title;
+            existing.time = relativeTime(s.last_updated);
+            existing.group = bucketTime(s.last_updated);
+            return existing;
+          }
+          return {
+            id: s.id,
+            title: s.title,
+            time: relativeTime(s.last_updated),
+            group: bucketTime(s.last_updated),
+            messages: [],
+            loaded: false,
+          };
+        });
+        // Preserve any locally-created chat that hasn't been persisted yet (isNew=true).
+        const pendingNew = this.chats.filter((c) => c.isNew && !byId.has(c.id));
+        this.chats = [...pendingNew, ...merged];
       } catch (e) {
-        this.chats = [];
+        // On error, leave the existing chat list intact — don't punish the user for a
+        // transient /sessions failure by blanking their sidebar.
       }
     },
 
@@ -495,7 +523,7 @@ window.vantage = function () {
           id: MID++, role: m.role,
           text: m.role === "user" ? m.content : "",
           md:   m.role === "assistant" ? m.content : "",
-          trace: [], elapsedMs: 0,
+          trace: [], timeline: [], elapsedMs: 0,
         }));
         chat.loaded = true;
         this.$nextTick(() => this.scrollToEnd());
@@ -603,8 +631,12 @@ window.vantage = function () {
       // indicator. The session_id arrives in the very first event so we can adopt it for
       // a new chat before any content lands.
       const assRaw = {
-        id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
+        id: MID++, role: "assistant", md: "", trace: [], timeline: [], elapsedMs: 0,
         streaming: true, currentTool: null, errored: null,
+        // _currentText buffers the model's interim text since the last tool call so we
+        // can commit it as a reasoning block when the next tool_start fires (see
+        // _handleStreamEvent). Underscored to discourage template binding.
+        _currentText: "",
       };
       // CRITICAL: after push, re-bind to the array element — that's Alpine's reactive
       // proxy. Mutating the local `assRaw` (the pre-push reference) bypasses Alpine's
@@ -697,20 +729,39 @@ window.vantage = function () {
           }
           break;
         case "text":
+          // Stream into the answer area AND a parallel buffer. If a tool_start fires
+          // next, the buffer becomes a "reasoning" block in the timeline and the matching
+          // tail of ass.md is retracted — only the *final* iteration's text stays as the
+          // answer. If no tool_start fires (single-iteration query), the buffer is just
+          // residual and ass.md is the answer as-streamed.
           if (ass.currentTool && ass.currentTool.tool === "thinking") ass.currentTool = null;
-          ass.md += data.delta || "";
+          const delta = data.delta || "";
+          ass.md += delta;
+          ass._currentText = (ass._currentText || "") + delta;
           ass.elapsedMs = Math.round(performance.now() - start);
           if (ass.md.length % 60 < 4) this.$nextTick(() => this.scrollToEnd());
           break;
         case "tool_start":
+          // Commit any accumulated reasoning text as a timeline thought BEFORE this tool
+          // (only on the iteration's first tool_start — by tool_end buffer is empty).
+          if (ass._currentText) {
+            ass.timeline.push({ kind: "thought", text: ass._currentText });
+            ass.md = ass.md.slice(0, Math.max(0, ass.md.length - ass._currentText.length));
+            ass._currentText = "";
+          }
           ass.currentTool = {
             tool: data.tool,
             argPreview: previewArgs(data.input || {}),
           };
-          // Push a placeholder trace entry; tool_end will fill in status + ms.
+          // Push a placeholder trace entry; tool_end will fill in status + ms. Also push
+          // a matching timeline entry so thoughts + tools render in the order they happened.
+          const argPreview = previewArgs(data.input || {});
           ass.trace.push({
-            tool: data.tool,
-            argPreview: previewArgs(data.input || {}),
+            tool: data.tool, argPreview,
+            status: "running", ms: 0,
+          });
+          ass.timeline.push({
+            kind: "tool", tool: data.tool, argPreview,
             status: "running", ms: 0,
           });
           break;
@@ -724,11 +775,21 @@ window.vantage = function () {
               break;
             }
           }
+          // Same for the timeline entry (kept in sync so the rendered order matches reality).
+          for (let i = ass.timeline.length - 1; i >= 0; i--) {
+            if (ass.timeline[i].kind === "tool" && ass.timeline[i].tool === data.tool
+                && ass.timeline[i].status === "running") {
+              ass.timeline[i].status = data.status;
+              ass.timeline[i].ms = data.ms;
+              break;
+            }
+          }
           ass.elapsedMs = Math.round(performance.now() - start);
           break;
         case "done":
           ass.elapsedMs = data.elapsed_ms || ass.elapsedMs;
           ass.currentTool = null;
+          ass._currentText = "";  // final iteration text stays in ass.md
           break;
         case "error":
           ass.errored = data.detail || "Stream error.";
@@ -796,9 +857,9 @@ window.vantage = function () {
       this.$nextTick(() => this.scrollToEnd());
 
       const assRaw = {
-        id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
+        id: MID++, role: "assistant", md: "", trace: [], timeline: [], elapsedMs: 0,
         streaming: true, currentTool: { tool: `skill:${s.name}`, argPreview: paramStr },
-        errored: null,
+        errored: null, _currentText: "",
       };
       // Re-bind to the reactive proxy after push — same Alpine reactivity gotcha as runAgent.
       chat.messages.push(assRaw);
