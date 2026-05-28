@@ -144,3 +144,114 @@ async def run_agent(query: str, token: str, principal: Principal,
 
     return {"answer": "Stopped after the step limit without a final answer.",
             "trace": trace, "elapsed_ms": _elapsed_ms()}
+
+
+async def run_agent_streaming(query: str, token: str, principal: Principal,
+                              history: list[dict] | None = None, system: str | None = None,
+                              allowed_tools: list[str] | None = None,
+                              max_steps: int = MAX_STEPS):
+    """Async generator version of `run_agent` — yields event dicts as they happen, so the
+    UI can render tokens as the model produces them (story X1 polish; ChatGPT-style UX).
+
+    Event shapes (all dicts; the SSE wrapper serialises them):
+      `{type: "text",       delta: str}`               — token-level text deltas
+      `{type: "tool_start", tool: str, input: dict}`   — about to call this MCP tool
+      `{type: "tool_end",   tool: str, status: str, ms: int}` — tool returned
+      `{type: "done",       trace: list, elapsed_ms: int, stopped?: bool}` — final event
+      `{type: "error",      detail: str}`              — caught exception
+
+    Same MCP session pattern as `run_agent`, same token forwarding, same RBAC re-verification.
+    The only thing that changes is we use the OpenAI SDK's `stream=True` and accumulate
+    tool_call deltas across chunks until `finish_reason="tool_calls"` lets us execute them.
+    """
+    system_prompt = system or _system_prompt(principal)
+    trace: list[dict] = []
+    started = time.perf_counter()
+
+    def _elapsed_ms() -> int:
+        return round((time.perf_counter() - started) * 1000)
+
+    async with streamablehttp_client(MCP_URL, headers={"Authorization": f"Bearer {token}"}) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            mcp_tools = (await session.list_tools()).tools
+            tools = [
+                _mcp_tool_to_openai(t) for t in mcp_tools
+                if allowed_tools is None or t.name in allowed_tools
+            ]
+            messages: list[dict] = [
+                {"role": "system", "content": system_prompt},
+                *(history or []),
+                {"role": "user", "content": query},
+            ]
+
+            for _ in range(max_steps):
+                stream = await aclient().chat.completions.create(
+                    model=MODEL, max_tokens=1024, tools=tools, messages=messages, stream=True,
+                )
+
+                content_parts: list[str] = []
+                tool_calls_acc: dict[int, dict] = {}
+                finish_reason: str | None = None
+
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason or finish_reason
+
+                    if delta.content:
+                        content_parts.append(delta.content)
+                        yield {"type": "text", "delta": delta.content}
+
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            slot = tool_calls_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                            if tc_delta.id:
+                                slot["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    slot["name"] += tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    slot["arguments"] += tc_delta.function.arguments
+
+                if tool_calls_acc:
+                    # Stream complete; the model wants to call tools. Append the assistant
+                    # turn with the tool_calls verbatim so the loop's next round sees its
+                    # own decision (OpenAI shape).
+                    tool_calls_list = [
+                        {"id": tc["id"], "type": "function",
+                         "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                        for tc in tool_calls_acc.values()
+                    ]
+                    messages.append({
+                        "role": "assistant",
+                        "content": "".join(content_parts) or None,
+                        "tool_calls": tool_calls_list,
+                    })
+
+                    # Execute each tool call, emit start/end events as we go.
+                    for tc in tool_calls_acc.values():
+                        try:
+                            args = json.loads(tc["arguments"] or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        yield {"type": "tool_start", "tool": tc["name"], "input": args}
+                        t0 = time.perf_counter()
+                        out = _payload(await session.call_tool(tc["name"], args))
+                        ms = round((time.perf_counter() - t0) * 1000)
+                        status = (out.get("status") if isinstance(out, dict) else "ok") or "ok"
+                        trace.append({"tool": tc["name"], "input": args, "result": out, "ms": ms})
+                        yield {"type": "tool_end", "tool": tc["name"], "status": status, "ms": ms}
+                        messages.append({
+                            "role": "tool", "tool_call_id": tc["id"],
+                            "content": json.dumps(out, default=str),
+                        })
+                    continue
+
+                # No tool_calls — the final answer has been streamed already.
+                yield {"type": "done", "trace": trace, "elapsed_ms": _elapsed_ms()}
+                return
+
+    yield {"type": "done", "trace": trace, "elapsed_ms": _elapsed_ms(), "stopped": True}

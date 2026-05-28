@@ -591,9 +591,10 @@ window.vantage = function () {
     },
 
     async runAgent(chat, text) {
-      // Push a placeholder assistant message; the "thinking" UI is bound to `streaming` until
-      // /ask returns. Real per-token streaming lands in a later PR; for now we just await
-      // the full response and drop it in. The trace + elapsed_ms come from the server.
+      // Real streaming via /ask/stream (SSE). Text deltas append into `ass.md` as they
+      // arrive; tool_start/end events drive the trace expander and the inline "calling…"
+      // indicator. The session_id arrives in the very first event so we can adopt it for
+      // a new chat before any content lands.
       const ass = {
         id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
         streaming: true, currentTool: null, errored: null,
@@ -601,19 +602,19 @@ window.vantage = function () {
       chat.messages.push(ass);
       this.isStreaming = true;
       this.cancelRequested = false;
-      // For the "calling…" indicator, we don't know the tool yet — generic placeholder.
       ass.currentTool = { tool: "thinking", argPreview: "" };
       this.$nextTick(() => this.scrollToEnd());
 
+      const start = performance.now();
+      const startedNewChat = chat.isNew;
+
       try {
-        // Don't send a session_id on the very first message of a new chat — the backend
-        // mints one and we adopt it from the response (it becomes the chat's permanent id).
         const body = { query: text };
         if (!chat.isNew) body.session_id = chat.id;
 
-        const r = await fetch("/ask", {
+        const r = await fetch("/ask/stream", {
           method: "POST", credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
           body: JSON.stringify(body),
         });
 
@@ -622,39 +623,103 @@ window.vantage = function () {
           this.authStatus = "guest";
           return this.finishStreaming(ass);
         }
-        if (!r.ok) {
+        if (!r.ok || !r.body) {
           const detail = await r.text().catch(() => `${r.status}`);
           ass.errored = `Agent error (${r.status}): ${detail.slice(0, 240)}`;
           return this.finishStreaming(ass);
         }
 
-        const data = await r.json();
-        // First /ask of a new chat: adopt the server's session_id as the chat id, so the
-        // sidebar entry and the session record line up from here on.
-        if (chat.isNew && data.session_id) {
-          chat.id = data.session_id;
-          chat.isNew = false;
-          this.activeChatId = data.session_id;
-          // The server now has the title; pull a fresh list to surface this chat properly.
+        // SSE reader: parse `event: NAME\ndata: JSON\n\n` frames as they arrive.
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let sep;
+          while ((sep = buffer.indexOf("\n\n")) !== -1) {
+            const frame = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            let evtName = "message";
+            const dataLines = [];
+            for (const line of frame.split("\n")) {
+              if (line.startsWith("event:")) evtName = line.slice(6).trim();
+              else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+            }
+            if (!dataLines.length) continue;
+            let evt;
+            try { evt = JSON.parse(dataLines.join("\n")); } catch { continue; }
+            this._handleStreamEvent(ass, chat, evtName, evt, start);
+          }
+        }
+
+        // If we never hit `done` (network drop mid-stream) the assistant message still has
+        // whatever streamed in so far — no need to error it.
+        if (chat.isNew && !startedNewChat) {
+          // shouldn't happen; sanity
+        } else if (startedNewChat) {
+          // The session event already adopted the server's id; just refresh the sidebar.
           this.loadSessions();
         } else {
-          // Just bump the time of an existing chat.
           chat.time = "just now";
           chat.group = "Today";
         }
-
-        ass.md = data.answer || "";
-        ass.trace = (data.trace || []).map((t) => ({
-          tool: t.tool,
-          argPreview: previewArgs(t.input || {}),
-          status: (t.result && t.result.status) || "ok",
-          ms: t.ms || 0,
-        }));
-        ass.elapsedMs = data.elapsed_ms || 0;
       } catch (e) {
         ass.errored = `Network error: ${e.message || e}`;
       } finally {
         this.finishStreaming(ass);
+      }
+    },
+
+    _handleStreamEvent(ass, chat, evt, data, start) {
+      switch (evt) {
+        case "session":
+          if (chat.isNew && data.session_id) {
+            chat.id = data.session_id;
+            chat.isNew = false;
+            this.activeChatId = data.session_id;
+          }
+          break;
+        case "text":
+          if (ass.currentTool && ass.currentTool.tool === "thinking") ass.currentTool = null;
+          ass.md += data.delta || "";
+          ass.elapsedMs = Math.round(performance.now() - start);
+          if (ass.md.length % 60 < 4) this.$nextTick(() => this.scrollToEnd());
+          break;
+        case "tool_start":
+          ass.currentTool = {
+            tool: data.tool,
+            argPreview: previewArgs(data.input || {}),
+          };
+          // Push a placeholder trace entry; tool_end will fill in status + ms.
+          ass.trace.push({
+            tool: data.tool,
+            argPreview: previewArgs(data.input || {}),
+            status: "running", ms: 0,
+          });
+          break;
+        case "tool_end":
+          ass.currentTool = null;
+          // Update the matching placeholder trace entry (last one for this tool).
+          for (let i = ass.trace.length - 1; i >= 0; i--) {
+            if (ass.trace[i].tool === data.tool && ass.trace[i].status === "running") {
+              ass.trace[i].status = data.status;
+              ass.trace[i].ms = data.ms;
+              break;
+            }
+          }
+          ass.elapsedMs = Math.round(performance.now() - start);
+          break;
+        case "done":
+          ass.elapsedMs = data.elapsed_ms || ass.elapsedMs;
+          ass.currentTool = null;
+          break;
+        case "error":
+          ass.errored = data.detail || "Stream error.";
+          break;
       }
     },
 
