@@ -141,24 +141,27 @@ _DRAFTER_SYSTEM = (
 )
 
 _PROPOSE_TOOL = {
-    "name": "propose_skill",
-    "description": "Propose a reusable skill that generalises the conversation.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "Short kebab-case skill name."},
-            "description": {"type": "string", "description": "One line: when to use this skill."},
-            "instructions": {"type": "string", "description": "Generalised steps; specific inputs replaced with {placeholder} tokens."},
-            "parameters": {
-                "type": "array",
-                "items": {"type": "object", "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "required": {"type": "boolean"},
-                }, "required": ["name", "description"]},
+    "type": "function",
+    "function": {
+        "name": "propose_skill",
+        "description": "Propose a reusable skill that generalises the conversation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Short kebab-case skill name."},
+                "description": {"type": "string", "description": "One line: when to use this skill."},
+                "instructions": {"type": "string", "description": "Generalised steps; specific inputs replaced with {placeholder} tokens."},
+                "parameters": {
+                    "type": "array",
+                    "items": {"type": "object", "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "required": {"type": "boolean"},
+                    }, "required": ["name", "description"]},
+                },
             },
+            "required": ["name", "description", "instructions", "parameters"],
         },
-        "required": ["name", "description", "instructions", "parameters"],
     },
 }
 
@@ -178,12 +181,17 @@ async def draft_from_session(history: list[dict], tools_used: list[str], name: s
     if name:
         prompt += f"\n\nUse this skill name: {name}"
 
-    resp = await aclient().messages.create(
-        model=MODEL, max_tokens=1024, system=_DRAFTER_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-        tools=[_PROPOSE_TOOL], tool_choice={"type": "tool", "name": "propose_skill"},
+    resp = await aclient().chat.completions.create(
+        model=MODEL, max_tokens=1024,
+        messages=[
+            {"role": "system", "content": _DRAFTER_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        tools=[_PROPOSE_TOOL],
+        tool_choice={"type": "function", "function": {"name": "propose_skill"}},
     )
-    draft = next((b.input for b in resp.content if b.type == "tool_use"), None)
+    tool_calls = resp.choices[0].message.tool_calls or []
+    draft = json.loads(tool_calls[0].function.arguments) if tool_calls else None
     if draft is None:
         return {"status": "error", "reason": "could not draft a skill from this session"}
 
