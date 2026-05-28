@@ -46,5 +46,8 @@ It is *not* a different agent design — it is the **same tools, same RBAC, same
 - **Is:** the on-demand demo of fleet view + cross-customer patterns. An admin calls it; the digest is generated synchronously. No new schema, no scheduler, no approval flow.
 - **Isn't:** the persistent observer, the role-aware push channels, or the propose-approve-route loop. Those are Phase 2 work the briefing endpoint *previews* in one synchronous call.
 
+## Where the data lives in production
+The observer paradigm above assumes Vantage can scan the data continuously. In production, that data actually lives across Acme's existing platforms (Zendesk, Salesforce, Persona, …). [13-Integration](13-Integration.md) walks through how the **scoped-context-graph** pattern reconciles *"we don't own the data"* with *"we observe continuously"* — and how our MCP design absorbs that without changing anything above the tool boundary.
+
 ## Bottom line
 > The architecture we built for the brief generalises into the proactive paradigm without rework: the same MCP tools called by a background runner, one new table for observations, one new tool for cross-customer aggregates, and a propose-approve-route layer on top. The hard problem isn't the wiring — it's the trust UX and the *"Acme is not internal IT"* framing. The Could-scoped admin briefing endpoint demonstrates the *shape* of the proactive idea on top of today's reactive tools.
