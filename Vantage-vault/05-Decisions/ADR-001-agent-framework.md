@@ -25,7 +25,7 @@ The decision: how to structure the agent loop — a minimal hand-written tool-ca
 Build a **minimal single-agent tool-calling loop** on the model's native tool use. The LLM chooses tools; each tool enforces RBAC server-side and queries Postgres; results return to the model until it answers. **Not LangGraph.**
 
 Two constraints baked in from day one:
-- **Model-agnostic** — the model call goes through one thin adapter (or LiteLLM), so swapping provider is a single-spot change.
+- **Model-agnostic** — the model call goes through `app/llm.py`, which uses the **OpenAI Python SDK with a swappable `base_url`** (the 2025-26 multi-provider lingua franca: Anthropic, Bedrock, OpenRouter, Together, Groq, Gemini all expose OpenAI-compatible endpoints). Swapping provider is **one env-var of work** (`LLM_BASE_URL` + `LLM_MODEL` + `LLM_API_KEY`); no code change. **LiteLLM considered and rejected** — March 2026 PyPI supply-chain compromise (versions 1.82.7/1.82.8 exfiltrated LLM credentials), plus documented streaming + tool-calling bugs across providers and ~40ms per-call overhead. **Gateway pattern (Portkey / Vercel AI Gateway / Bifrost)** is the right answer at governance/observability scale — deferred until volume demands it (out of scope for a single-host demo).
 - **Designed for a contained LangGraph migration later** — tools are standalone functions exposed via the MCP server; session state is explicit and serializable (in Redis); the loop lives in one module. A future move to LangGraph swaps only the orchestration layer; tools, data, RBAC, MCP, and evals all carry over.
 
 ## Alternatives considered

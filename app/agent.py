@@ -1,11 +1,17 @@
-"""Agent loop — a minimal single-agent tool-calling loop (ADR-001), now an MCP client.
+"""Agent loop — a minimal single-agent tool-calling loop (ADR-001), an MCP client over
+Streamable HTTP and an OpenAI-compatible LLM client (any provider via base_url, ADR-001).
 
-Claude is given the tools *discovered from the MCP server* (ADR-003) plus the caller's role
-for context; it decides which tools to call; we forward each call to the MCP server over
-Streamable HTTP **with the user's bearer token**, so the server re-verifies it and enforces
-RBAC inside the tool (ADR-002 / 09-Security T2,T4). RBAC is never in the prompt — the model
-may propose any tool, but the tool (behind MCP) disposes. A `trace` of tool calls is returned
-for observability. One MCP session is opened per request and torn down at the end.
+Claude (or any swapped-in model) is given the tools **discovered from the MCP server**
+(ADR-003) plus the caller's role for context; it decides which tools to call; we forward each
+call to the MCP server **with the user's bearer token**, so the server re-verifies it and
+enforces RBAC inside the tool (ADR-002 / 09-Security T2,T4). RBAC is never in the prompt —
+the model may propose any tool, but the tool (behind MCP) disposes. A `trace` of tool calls
+(with per-tool ms) + total `elapsed_ms` is returned for observability. One MCP session per
+request; torn down at the end.
+
+Message shapes follow OpenAI Chat-Completions (the 2025-26 multi-provider lingua franca):
+the system prompt is the first `system` message; tool calls come back as `tool_calls` on
+the assistant turn; tool results are appended as `role: "tool"` messages keyed by tool_call_id.
 """
 import json
 import os
@@ -47,15 +53,28 @@ def _payload(result) -> dict:
     return {}
 
 
+def _mcp_tool_to_openai(t) -> dict:
+    """Convert an MCP-discovered tool to the OpenAI function-tool shape."""
+    return {
+        "type": "function",
+        "function": {
+            "name": t.name,
+            "description": t.description or "",
+            "parameters": t.inputSchema,
+        },
+    }
+
+
 async def run_agent(query: str, token: str, principal: Principal,
                     history: list[dict] | None = None, system: str | None = None,
                     allowed_tools: list[str] | None = None, max_steps: int = MAX_STEPS) -> dict:
-    """Run the tool-calling loop for one query against the MCP server; return {"answer","trace"}.
+    """Run the tool-calling loop for one query against the MCP server; return
+    {"answer", "trace", "elapsed_ms"}.
 
-    `history` is the prior conversation (Anthropic messages) for multi-turn context (story X1).
+    `history` is the prior conversation (OpenAI messages) for multi-turn context (story X1).
     `system` overrides the default prompt (used by the Skill runner to inject a skill's
     instructions). `allowed_tools` restricts the discovered tools to a named subset (a skill's
-    whitelist — least privilege on top of RBAC). Defaults preserve the plain /ask behaviour.
+    whitelist — least privilege on top of RBAC). Defaults preserve plain /ask behaviour.
     """
     system_prompt = system or _system_prompt(principal)
     trace: list[dict] = []
@@ -68,41 +87,57 @@ async def run_agent(query: str, token: str, principal: Principal,
         async with ClientSession(read, write) as session:
             await session.initialize()
             # Tool list + schemas come from MCP discovery — not hard-coded here (ADR-003).
+            mcp_tools = (await session.list_tools()).tools
             tools = [
-                {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema}
-                for t in (await session.list_tools()).tools
+                _mcp_tool_to_openai(t) for t in mcp_tools
                 if allowed_tools is None or t.name in allowed_tools
             ]
-            messages: list[dict] = [*(history or []), {"role": "user", "content": query}]
+            messages: list[dict] = [
+                {"role": "system", "content": system_prompt},
+                *(history or []),
+                {"role": "user", "content": query},
+            ]
 
             for _ in range(max_steps):
-                resp = await aclient().messages.create(
+                resp = await aclient().chat.completions.create(
                     model=MODEL,
                     max_tokens=1024,
-                    system=system_prompt,
                     tools=tools,
                     messages=messages,
                 )
-                if resp.stop_reason == "tool_use":
-                    messages.append({"role": "assistant", "content": resp.content})
-                    results = []
-                    for block in resp.content:
-                        if block.type == "tool_use":
-                            t0 = time.perf_counter()
-                            out = _payload(await session.call_tool(block.name, block.input))
-                            trace.append({
-                                "tool": block.name, "input": block.input, "result": out,
-                                "ms": round((time.perf_counter() - t0) * 1000),
-                            })
-                            results.append({
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": json.dumps(out, default=str),
-                            })
-                    messages.append({"role": "user", "content": results})
+                msg = resp.choices[0].message
+                if msg.tool_calls:
+                    # Append the assistant turn (with tool_calls) verbatim so the model sees
+                    # its own decision on the next iteration.
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": [
+                            {"id": tc.id, "type": "function",
+                             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                            for tc in msg.tool_calls
+                        ],
+                    })
+                    # Execute each tool call; append a `role: "tool"` result keyed by tool_call_id.
+                    for tc in msg.tool_calls:
+                        t0 = time.perf_counter()
+                        try:
+                            args = json.loads(tc.function.arguments or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        out = _payload(await session.call_tool(tc.function.name, args))
+                        trace.append({
+                            "tool": tc.function.name, "input": args, "result": out,
+                            "ms": round((time.perf_counter() - t0) * 1000),
+                        })
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(out, default=str),
+                        })
                     continue
-                answer = "".join(b.text for b in resp.content if b.type == "text")
-                return {"answer": answer, "trace": trace, "elapsed_ms": _elapsed_ms()}
+                # Final answer.
+                return {"answer": msg.content or "", "trace": trace, "elapsed_ms": _elapsed_ms()}
 
     return {"answer": "Stopped after the step limit without a final answer.",
             "trace": trace, "elapsed_ms": _elapsed_ms()}

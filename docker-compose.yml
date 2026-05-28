@@ -73,8 +73,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       MCP_URL: http://mcp:8001/mcp          # the agent reaches tools only via the MCP server
       AUTHORED_SKILLS_DIR: /data/skills     # user-authored skills (Flow 1) on a persistent volume
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Model-agnostic via OpenAI SDK + base_url (ADR-001). Swap providers by changing these.
+      LLM_BASE_URL: https://api.anthropic.com/v1/
       LLM_MODEL: claude-sonnet-4-6
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}   # back-compat fallback if LLM_API_KEY unset
     # No DATABASE_URL: the API holds no database access — tools run behind the MCP server (ADR-003).
     volumes:
       - skills_data:/data/skills            # authored skills survive a container rebuild
