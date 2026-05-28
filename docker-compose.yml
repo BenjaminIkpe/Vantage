@@ -66,10 +66,14 @@ services:
   api:
     build: ./app
     environment:
-      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_URL: http://keycloak:8080            # internal — backchannel (token exchange, JWKS)
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}  # frontchannel — what the browser hits
       KEYCLOAK_ISSUER: http://localhost:8080/realms/vantage
       KEYCLOAK_REALM: vantage
       KEYCLOAK_CLIENT_ID: vantage-api
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-vantage-secret}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}        # set true when served behind HTTPS (Codespaces, prod)
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       REDIS_URL: redis://redis:6379/0
       MCP_URL: http://mcp:8001/mcp          # the agent reaches tools only via the MCP server
       AUTHORED_SKILLS_DIR: /data/skills     # user-authored skills (Flow 1) on a persistent volume

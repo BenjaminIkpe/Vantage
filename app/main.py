@@ -4,14 +4,27 @@ from pathlib import Path
 
 import httpx
 import redis as redis_lib
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import oidc
 from auth import Authed, Principal, authed, verify_token
 from agent import run_agent
-from session import load_history, load_tools, record_tools, resolve_session_id, save_turn
+from security import verify_access_token
+from session import (
+    consume_oauth_state,
+    delete_auth_session,
+    load_auth_session,
+    load_history,
+    load_tools,
+    record_tools,
+    resolve_session_id,
+    save_turn,
+    store_auth_session,
+    store_oauth_state,
+)
 from skills import draft_from_session, get_skill, load_skills, run_skill, save_skill
 
 app = FastAPI(title="Vantage API")
@@ -57,9 +70,99 @@ def ready():
 
 
 @app.get("/whoami")
-def whoami(principal: Principal = Depends(verify_token)):
-    """Proves JWT verification + role extraction (T1/T2)."""
-    return {"username": principal.username, "roles": principal.roles}
+def whoami(caller: Authed = Depends(authed)):
+    """The current caller's identity + roles. Accepts either a Bearer header (programmatic
+    clients) or the `vantage_sid` session cookie (browser UI). Proves JWT verification +
+    role extraction (T1/T2)."""
+    return {"username": caller.principal.username, "roles": caller.principal.roles}
+
+
+# --- OIDC Authorization Code + PKCE flow (BFF; ADR-002 / 09-Security hardening) ---------
+# Browser hits /auth/login → redirect to Keycloak. Keycloak redirects back to /auth/callback
+# with `code` + `state`. We exchange the code for tokens server-side, store them in Redis,
+# set an httpOnly cookie naming the server-side session. The access token never reaches
+# the browser. /auth/logout clears both ends. /auth/whoami is the UI's bootstrap call.
+
+_COOKIE_NAME = "vantage_sid"
+_COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+_COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax")
+
+
+def _public_base(request: Request) -> str:
+    """The public-facing API URL the browser sees (used to build the redirect_uri).
+
+    Respects `X-Forwarded-Proto` / `X-Forwarded-Host` so it works behind Codespaces' HTTPS
+    forward and any reverse proxy.
+    """
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
+    return f"{proto}://{host}"
+
+
+@app.get("/auth/login")
+def auth_login(request: Request):
+    """Start the OIDC Auth-Code + PKCE flow — redirect the browser to Keycloak's login."""
+    code_verifier, code_challenge = oidc.gen_pkce()
+    state = oidc.gen_state()
+    redirect_uri = f"{_public_base(request)}/auth/callback"
+    store_oauth_state(state, {"code_verifier": code_verifier, "redirect_uri": redirect_uri})
+    return RedirectResponse(oidc.authorize_url(redirect_uri, state, code_challenge), status_code=302)
+
+
+@app.get("/auth/callback")
+async def auth_callback(code: str, state: str):
+    """Keycloak redirected the browser back with `code` + `state`. Exchange + set cookie."""
+    stored = consume_oauth_state(state)
+    if not stored:
+        raise HTTPException(status_code=400, detail="invalid or expired OAuth state")
+    try:
+        tokens = await oidc.exchange_code(code, stored["redirect_uri"], stored["code_verifier"])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"token exchange failed: {exc}")
+
+    access_token = tokens["access_token"]
+    # Verify here so a malformed token surfaces immediately (and the same verifier the MCP
+    # boundary uses — no trust-on-issuance).
+    try:
+        principal = verify_access_token(access_token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"received-token verify failed: {exc}")
+
+    sid = oidc.gen_sid()
+    ttl = int(tokens.get("expires_in", 3600))
+    store_auth_session(sid, {
+        "access_token": access_token,
+        "refresh_token": tokens.get("refresh_token", ""),
+        "username": principal.username,
+        "roles": principal.roles,
+        "subject": principal.subject,
+    }, ttl=ttl)
+
+    resp = RedirectResponse("/", status_code=302)
+    resp.set_cookie(
+        _COOKIE_NAME, sid,
+        httponly=True, secure=_COOKIE_SECURE, samesite=_COOKIE_SAMESITE, path="/", max_age=ttl,
+    )
+    return resp
+
+
+@app.get("/auth/logout")
+async def auth_logout(vantage_sid: str | None = Cookie(default=None)):
+    """Clear server-side session + cookie. Best-effort Keycloak refresh-token revoke."""
+    if vantage_sid:
+        sess = load_auth_session(vantage_sid)
+        if sess and sess.get("refresh_token"):
+            await oidc.revoke_session(sess["refresh_token"])
+        delete_auth_session(vantage_sid)
+    resp = RedirectResponse("/", status_code=302)
+    resp.delete_cookie(_COOKIE_NAME, path="/")
+    return resp
+
+
+@app.get("/auth/whoami")
+def auth_whoami(caller: Authed = Depends(authed)):
+    """Same shape as /whoami; explicit auth-namespace endpoint the UI calls on init."""
+    return {"username": caller.principal.username, "roles": caller.principal.roles}
 
 
 class AskRequest(BaseModel):

@@ -307,9 +307,17 @@ function displayUser(role) {
 // ─────────────────────────────────────────────────────────────────────────────
 window.vantage = function () {
   return {
-    // identity
-    role: "admin",
+    // identity — `me` comes from GET /auth/whoami (real Keycloak session via httpOnly
+    // BFF cookie; the access token never reaches the browser). authStatus: 'checking' on
+    // first load, 'authed' once whoami returns 200, 'guest' if 401 (sign-in card shown).
+    authStatus: "checking",
+    me: null,
+    role: "admin",   // active-role key the UI binds to; reset from /auth/whoami
     get user() {
+      if (this.me) {
+        const initials = (this.me.username || "?").slice(0, 2).toUpperCase();
+        return { name: this.me.username, initials, email: `${this.me.username}@acme.test` };
+      }
       return { sales: { name: "Priya Nair", initials: "PN", email: "sales@acme.test" },
                support: { name: "Marcus Webb", initials: "MW", email: "support@acme.test" },
                admin: { name: "Dana Okafor", initials: "DO", email: "admin@acme.test" }
@@ -401,7 +409,29 @@ window.vantage = function () {
         }
       });
       this.$nextTick(() => this.scrollToEnd());
+      // Ask the backend who's logged in (cookie flows automatically).
+      this.whoami();
     },
+
+    // auth — bootstrap, sign in, sign out
+    async whoami() {
+      try {
+        const r = await fetch("/auth/whoami", { credentials: "include" });
+        if (r.status === 401) { this.authStatus = "guest"; return; }
+        if (!r.ok) throw new Error(`whoami ${r.status}`);
+        const data = await r.json();
+        this.me = data;
+        // Map realm roles → the UI's role key. First match wins; default to lowest priv.
+        const roleMap = { admin: "admin", support_user: "support", sales_user: "sales" };
+        const matched = (data.roles || []).map((r) => roleMap[r]).find(Boolean);
+        if (matched) this.role = matched;
+        this.authStatus = "authed";
+      } catch (e) {
+        this.authStatus = "guest";
+      }
+    },
+    signIn()  { window.location.href = "/auth/login"; },
+    signOut() { window.location.href = "/auth/logout"; },
 
     // theme
     setTheme(t) { this.theme = t; document.documentElement.setAttribute("data-theme", t); localStorage.setItem("vantage.theme", t); },
