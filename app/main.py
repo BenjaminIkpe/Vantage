@@ -16,14 +16,18 @@ from security import verify_access_token
 from session import (
     consume_oauth_state,
     delete_auth_session,
+    delete_user_session,
     load_auth_session,
     load_history,
     load_tools,
     record_tools,
+    record_user_session,
     resolve_session_id,
     save_turn,
     store_auth_session,
     store_oauth_state,
+    user_owns_session,
+    user_sessions,
 )
 from skills import draft_from_session, get_skill, load_skills, run_skill, save_skill
 
@@ -190,14 +194,49 @@ async def ask(req: AskRequest, caller: Authed = Depends(authed)):
         raise HTTPException(status_code=502, detail=f"agent error: {exc}")
     save_turn(session_id, req.query, result["answer"])
     record_tools(session_id, [t["tool"] for t in result.get("trace", [])])
+    # Index this session under the calling user so it appears in the sidebar history.
+    # The first turn sets the title (subsequent turns just bump last_updated).
+    record_user_session(caller.principal.username, session_id, req.query)
     return {**result, "session_id": session_id}
 
 
+# --- Per-user session history (chat-history sidebar) ------------------------------------
+
+
+@app.get("/sessions")
+def list_sessions(caller: Authed = Depends(authed)):
+    """The current user's chat history for the sidebar. Newest first."""
+    return {"sessions": user_sessions(caller.principal.username)}
+
+
+@app.get("/sessions/{session_id}")
+def get_session(session_id: str, caller: Authed = Depends(authed)):
+    """Return one session's full message history for the chat to replay it. 404 if the caller
+    doesn't own this session (prevents cross-user history reads — defence in depth even though
+    session ids are 32-char unguessable already)."""
+    if not user_owns_session(caller.principal.username, session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {
+        "session_id": session_id,
+        "messages": load_history(session_id),
+        "tools_used": load_tools(session_id),
+    }
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str, caller: Authed = Depends(authed)):
+    """Remove a session from the user's sidebar + delete its data. Idempotent."""
+    if not delete_user_session(caller.principal.username, session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"status": "deleted", "session_id": session_id}
+
+
 @app.get("/skills")
-def list_skills(principal: Principal = Depends(verify_token)):
+def list_skills(caller: Authed = Depends(authed)):
     """List the available reusable Skills (any authenticated role). See app/skills.py."""
     return {"skills": [
-        {"name": s.name, "description": s.description, "parameters": s.parameters}
+        {"name": s.name, "description": s.description, "parameters": s.parameters,
+         "allowed_tools": s.allowed_tools}
         for s in load_skills().values()
     ]}
 
@@ -225,10 +264,12 @@ class DraftFromSessionRequest(BaseModel):
 
 
 @app.post("/skills/draft-from-session")
-async def draft_skill(req: DraftFromSessionRequest, principal: Principal = Depends(verify_token)):
+async def draft_skill(req: DraftFromSessionRequest, caller: Authed = Depends(authed)):
     """Turn a finished session into a reusable skill DRAFT (Flow 1). Not saved — review it, then
     POST /skills to keep it. Any authenticated role may author (a skill can't exceed its caller's
-    permissions; RBAC stays in the tools)."""
+    permissions; RBAC stays in the tools). The caller must own the session being drafted from."""
+    if not user_owns_session(caller.principal.username, req.session_id):
+        raise HTTPException(status_code=404, detail="session not found")
     return await draft_from_session(load_history(req.session_id), load_tools(req.session_id), req.name)
 
 
@@ -241,7 +282,7 @@ class SaveSkillRequest(BaseModel):
 
 
 @app.post("/skills")
-def create_skill(req: SaveSkillRequest, principal: Principal = Depends(verify_token)):
+def create_skill(req: SaveSkillRequest, caller: Authed = Depends(authed)):
     """Persist an authored skill (the reviewed draft). Returns the saved skill."""
     try:
         skill = save_skill(req.model_dump())
