@@ -51,15 +51,31 @@ def send_message(page: Page, text: str):
     inp.press("Enter")
 
 
+def _alpine_streaming(page: Page):
+    """Read `isStreaming` from the body's Alpine 3 component (returns None if unreachable)."""
+    return page.evaluate("""() => {
+      if (window.Alpine && document.body) {
+        try {
+          const d = window.Alpine.$data(document.body);
+          return typeof d.isStreaming === 'boolean' ? d.isStreaming : null;
+        } catch (e) { return null; }
+      }
+      return null;
+    }""")
+
+
 def wait_for_streaming_done(page: Page, timeout: float = 45.0):
     """Block until isStreaming is back to false (i.e. the run has finished)."""
     start = time.time()
     while time.time() - start < timeout:
-        is_streaming = page.evaluate("() => document.querySelector('body').__x?.$data?.isStreaming")
-        if is_streaming is False:
+        if _alpine_streaming(page) is False:
             return
         time.sleep(0.25)
-    raise TimeoutError("streaming did not finish in time")
+    raise TimeoutError(f"streaming did not finish in {timeout}s")
+
+
+def is_streaming(page: Page) -> bool:
+    return _alpine_streaming(page) is True
 
 
 def assistant_messages(page: Page):

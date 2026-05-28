@@ -17,7 +17,7 @@ from playwright.sync_api import Page, BrowserContext, expect
 
 from helpers import (
     BASE_URL, SEL, sign_in_as, send_message, wait_for_streaming_done,
-    assistant_messages, last_assistant_text,
+    assistant_messages, last_assistant_text, is_streaming,
 )
 
 
@@ -90,9 +90,7 @@ class TestBasicChat:
         inp.click()
         inp.press("Enter")
         time.sleep(1.0)
-        assert page_support.evaluate(
-            "() => document.querySelector('body').__x?.$data?.isStreaming"
-        ) in (False, None)
+        assert not is_streaming(page_support)
 
     def test_whitespace_only_input_does_not_send(self, page_support: Page):
         inp = page_support.locator(SEL["chat_input"])
@@ -100,9 +98,7 @@ class TestBasicChat:
         inp.fill("    \t  \n   ")
         inp.press("Enter")
         time.sleep(1.0)
-        assert page_support.evaluate(
-            "() => document.querySelector('body').__x?.$data?.isStreaming"
-        ) in (False, None)
+        assert not is_streaming(page_support)
 
     def test_send_via_enter_shows_user_bubble(self, page_support: Page):
         msg = "Open issues for Velocity Marketplace?"
@@ -135,9 +131,7 @@ class TestBasicChat:
         # Either we see "stop" affordance OR streaming has already finished
         wait_for_streaming_done(page_support, timeout=60)
         # After finishing, isStreaming false
-        assert page_support.evaluate(
-            "() => document.querySelector('body').__x?.$data?.isStreaming"
-        ) in (False, None)
+        assert not is_streaming(page_support)
 
     def test_user_bubble_renders_text_safely(self, page_support: Page):
         msg = "<script>alert(1)</script> and a <b>bold</b> thing"
@@ -206,9 +200,7 @@ class TestStreaming:
         send_message(page_support, "Open issues for Velocity Marketplace?")
         wait_for_streaming_done(page_support, timeout=60)
         # isStreaming back to false
-        assert page_support.evaluate(
-            "() => document.querySelector('body').__x?.$data?.isStreaming"
-        ) in (False, None)
+        assert not is_streaming(page_support)
 
     def test_tool_indicator_appears_mid_stream(self, page_support: Page):
         """The 'calling X…' indicator should appear at least briefly between deltas."""
