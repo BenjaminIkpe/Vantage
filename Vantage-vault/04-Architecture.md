@@ -14,9 +14,10 @@ updated: 2026-05-27
 - **[ADR-001](05-Decisions/ADR-001-agent-framework.md)** — agent = simple tool-calling loop (not LangGraph); model-agnostic; built for a contained LangGraph migration.
 - **[ADR-002](05-Decisions/ADR-002-rbac-tool-boundary.md)** — RBAC enforced server-side in each tool (never in the prompt); Keycloak is the source of truth for roles.
 - **[ADR-003](05-Decisions/ADR-003-mcp-server.md)** — custom MCP server exposing the 5 named tools; HTTP transport (stdio fallback).
-- **[ADR-004](05-Decisions/ADR-004-environment.md)** — Azure VM running a portable Docker Compose stack.
+- **[ADR-004](05-Decisions/ADR-004-environment.md)** — *(superseded)* Azure VM was the original plan; SKU-locked.
 - **[ADR-005](05-Decisions/ADR-005-seed-data.md)** — committed static seed, generated hybrid (Faker + Claude), shaped to the evals.
 - **[ADR-006](05-Decisions/ADR-006-memory-split.md)** — Redis for session/working memory; PostgreSQL as the system of record.
+- **[ADR-007](05-Decisions/ADR-007-environment-codespaces.md)** — dev/demo host is **GitHub Codespaces** (Docker-in-Docker) running the portable compose stack.
 
 ## Component map (Docker Compose services)
 - **App / API** — entry point (FastAPI assumed); validates the Keycloak token, runs the agent loop.
@@ -26,13 +27,20 @@ updated: 2026-05-27
 - **Redis** — multi-turn session memory.
 - **Keycloak** — authentication + role issuance.
 
-*All on one Azure VM's private Docker network (ADR-004); MCP HTTP is container-to-container, not internet-exposed.*
+*All on the host's private Docker network ([ADR-007](05-Decisions/ADR-007-environment-codespaces.md): GitHub Codespaces with Docker-in-Docker); MCP HTTP is container-to-container, not internet-exposed. The forwarded Keycloak JWT is **re-verified at the MCP boundary** (ADR-002/003), so each tool checks RBAC on a token it has just validated.*
 
 ## The agent
 Minimal single-agent tool-calling loop (ADR-001): question → Claude selects tool(s) → tool runs (RBAC-checked) → result → repeat → answer. The model call sits behind a thin adapter for provider-agnosticism.
 
 ## Tools (the five)
 `get_customer_profile` · `get_open_issues` · `summarise_issue_history` · `update_issue` · `create`/`update_next_action`. Standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
+
+## Skills (reusable, named capabilities)
+A **Skill** is a packaged, reusable capability — the Anthropic Agent-Skill pattern, embodied here as a small JSON file: `{name, description, instructions, parameters[], allowed_tools[]}`. Running a Skill *reuses the agent loop*: the skill's instructions become the system prompt and `allowed_tools` restricts the toolset — **least privilege on top of** the per-tool RBAC. A Skill is *just a prompt + a tool whitelist*, so even a user-authored skill can never exceed the caller's permissions (the dividend of keeping RBAC in the tools, not the prompt).
+
+- **Seeded:** `escalation-summary` (story S2) — read-only, persists nothing; encodes the risk rubric below.
+- **Users can author their own** by turning a finished `/ask` session into a Skill (the LLM generalises the conversation; `allowed_tools` = the tools the session actually used). Seeded skills are committed in the image; authored skills live on a writable volume.
+- Endpoints: `GET /skills`, `POST /skills/{name}/run`, `POST /skills/draft-from-session`, `POST /skills` (save).
 
 ## Where RBAC is enforced
 Server-side, inside each tool (ADR-002). Keycloak issues a token carrying the user's role; the verified role is threaded to the tool; the tool checks before acting. *The LLM proposes; the tool disposes.*
@@ -67,7 +75,7 @@ Mermaid — renders in both Obsidian and on GitHub (portable; lift into the READ
 flowchart TD
     User(["User — sales / support / admin"])
 
-    subgraph VM["Azure VM · Docker Compose private network"]
+    subgraph Stack["Docker Compose · private network (Codespace host, ADR-007)"]
         API["API · FastAPI<br/>validates token, runs agent loop"]
         KC["Keycloak<br/>authentication + roles"]
         Loop["Agent loop<br/>Claude (model adapter)"]
@@ -85,4 +93,4 @@ flowchart TD
     MCP -.->|"denied → message + log"| Loop
 ```
 
-*Flow: user sends query + Keycloak token → API validates it and extracts the role → the agent loop (Claude) selects tools → calls the MCP server over HTTP with the role → each tool checks the role, then runs parameterized SQL against Postgres (or returns a logged denial). Session context lives in Redis. Everything runs inside the Azure VM's private Docker network.*
+*Flow: user sends query + Keycloak token → API validates it and gates the request → the agent (an MCP client) **forwards the token** to the MCP server → MCP **re-verifies it** and each tool checks the role, then runs parameterized SQL against Postgres (or returns a logged denial). Session context lives in Redis. Everything runs inside the host's private Docker network ([ADR-007](05-Decisions/ADR-007-environment-codespaces.md): GitHub Codespaces).*

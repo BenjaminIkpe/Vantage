@@ -30,13 +30,13 @@ These split into two jobs: **reactive support** (work the issue queue) and **pro
 > Acme's support and account teams get one secure assistant that answers in plain English across systems they'd otherwise check by hand — whether a support rep picking up an issue (open issues, history, recording the fix) or an account manager checking an account's health and risk before a client call. Every answer is grounded in Acme's own records and traceable to source; every action is gated by the user's role and logged. The result: faster, more consistent customer handling, and an auditable trail of who saw and changed what.
 
 ## Definition of Done (DoD)
-- [ ] Runs end-to-end with one command (`docker compose up`).
-- [ ] All required components present and wired together.
-- [ ] Agent selects tools dynamically; answers grounded in the database; unhappy paths (not-found, ambiguous name) handled **without inventing data**.
-- [ ] Holds context across a multi-turn session (Redis).
-- [ ] RBAC demonstrably enforced — including at least one *denied* case.
-- [ ] Eval set (5–10 questions) passes, with documented results.
-- [ ] Every design choice defensible in the panel (logged as ADRs).
+- [x] Runs end-to-end with one command (`docker compose up`).
+- [x] All required components present and wired together.
+- [x] Agent selects tools dynamically; answers grounded in the database; unhappy paths (not-found, ambiguous name) handled **without inventing data**.
+- [x] Holds context across a multi-turn session (Redis).
+- [x] RBAC demonstrably enforced — including at least one *denied* case.
+- [x] Eval set (5–10 questions) passes, with documented results (10/10 — [07-Evals](07-Evals.md)).
+- [x] Every design choice defensible in the panel (logged as ADRs).
 
 ## Primary users
 Roles: `sales_user`, `support_user`, `admin`. Full detail in [02-User-Stories](02-User-Stories.md).

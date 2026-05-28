@@ -29,4 +29,4 @@ The brief requires ≥1 MCP (Model Context Protocol) server and asks us to expla
 - ✅ Tools decoupled and reusable — the agent *discovers* them; also the LangGraph migration bridge (ADR-001).
 - ✅ Strong "why MCP" and "why not a database MCP server" panel answers, with a current, concrete security example.
 - ⚠️ HTTP adds one integration point: threading the verified role from API → MCP server. If painful, drop to stdio (fallback above).
-- Note: on a single Azure VM (ADR-004) this HTTP is container-to-container on a private Docker network — not internet-exposed.
+- Note: on the dev/demo host ([ADR-007](ADR-007-environment-codespaces.md): GitHub Codespaces with Docker-in-Docker) this HTTP is container-to-container on the compose stack's private network — not internet-exposed.
