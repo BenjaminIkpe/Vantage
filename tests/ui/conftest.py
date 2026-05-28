@@ -29,11 +29,6 @@ def browser_context_args(browser_context_args):
 
 
 @pytest.fixture
-def base_url():
-    return BASE_URL
-
-
-@pytest.fixture
 def signed_in_page(page: Page, request):
     """Sign in as the role specified via @pytest.mark.role("sales|support|admin")."""
     marker = request.node.get_closest_marker("role")
