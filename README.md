@@ -58,6 +58,9 @@ docker compose up --build     # db + redis + keycloak + mcp + api
 ```
 Postgres loads `db/schema.sql` then `db/seed.sql` on first init. Check readiness: `curl localhost:8000/ready`.
 
+### Chat UI
+Open **<http://localhost:8000/>** in a browser. Single-page chat (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify) — sidebar of past chats, per-message tool-trace expander, Skills menu, "save as skill" affordance, dark/light themes. **PR foundation: backend is currently mocked client-side**; the next PR wires the real OIDC auth + streaming `/ask/stream` + `/sessions` + `/skills/*` endpoints documented below.
+
 ### Get a token + ask (dev)
 ```bash
 TOKEN=$(curl -s http://localhost:8080/realms/vantage/protocol/openid-connect/token \

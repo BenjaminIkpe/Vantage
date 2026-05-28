@@ -1,9 +1,12 @@
 """Vantage API — auth-gated entry point. See Vantage-vault/04-Architecture.md."""
 import os
+from pathlib import Path
 
 import httpx
 import redis as redis_lib
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from auth import Authed, Principal, authed, verify_token
@@ -12,6 +15,17 @@ from session import load_history, load_tools, record_tools, resolve_session_id, 
 from skills import draft_from_session, get_skill, load_skills, run_skill, save_skill
 
 app = FastAPI(title="Vantage API")
+
+# Static chat UI — lifted from the Claude Design handoff (see Vantage-vault/04-Architecture.md
+# § "The UI"). Mocked routing in web/app.js will be replaced by real backend calls (auth-code
+# OIDC, streaming /ask/stream, /sessions, /skills/*) in the next PR.
+_WEB_DIR = Path(__file__).parent / "web"
+if _WEB_DIR.is_dir():
+    app.mount("/web", StaticFiles(directory=_WEB_DIR), name="web")
+
+    @app.get("/")
+    def root():
+        return FileResponse(_WEB_DIR / "index.html")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")
