@@ -1,0 +1,4 @@
+playwright>=1.49
+pytest>=8.0
+pytest-playwright>=0.5
+pytest-xdist>=3.5
