@@ -5,13 +5,15 @@ from pathlib import Path
 import httpx
 import redis as redis_lib
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import oidc
 from auth import Authed, Principal, authed, verify_token
-from agent import run_agent
+import json as _json
+
+from agent import run_agent, run_agent_streaming
 from security import verify_access_token
 from session import (
     consume_oauth_state,
@@ -198,6 +200,54 @@ async def ask(req: AskRequest, caller: Authed = Depends(authed)):
     # The first turn sets the title (subsequent turns just bump last_updated).
     record_user_session(caller.principal.username, session_id, req.query)
     return {**result, "session_id": session_id}
+
+
+@app.post("/ask/stream")
+async def ask_stream(req: AskRequest, caller: Authed = Depends(authed)):
+    """Streaming `/ask` via Server-Sent Events. Same agent loop, same persistence — but
+    the UI sees tokens (and tool calls) as they happen. Event types:
+      `session`     → `{session_id}` (sent first; UI adopts it for a new chat)
+      `text`        → `{delta}` (token-level text)
+      `tool_start`  → `{tool, input}`
+      `tool_end`    → `{tool, status, ms}`
+      `done`        → `{trace, elapsed_ms}` (final)
+      `error`       → `{detail}` (caught exception mid-stream)
+
+    The eval harness keeps using the non-streaming `/ask` (deterministic for assertions);
+    this endpoint is the UI surface.
+    """
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="query must be a non-empty string")
+    session_id = resolve_session_id(req.session_id)
+    history = load_history(session_id)
+
+    async def event_stream():
+        answer_parts: list[str] = []
+        trace: list[dict] = []
+        # Send the session id first so the UI can adopt it before any content arrives.
+        yield f"event: session\ndata: {_json.dumps({'session_id': session_id})}\n\n"
+        try:
+            async for event in run_agent_streaming(
+                req.query, token=caller.token, principal=caller.principal, history=history,
+            ):
+                if event["type"] == "text":
+                    answer_parts.append(event["delta"])
+                if event["type"] == "done":
+                    trace = event.get("trace", [])
+                yield f"event: {event['type']}\ndata: {_json.dumps(event, default=str)}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {_json.dumps({'detail': str(exc)})}\n\n"
+        finally:
+            # Persist regardless of whether the stream finished cleanly — partial answers
+            # are still real conversation context.
+            answer = "".join(answer_parts)
+            if answer:
+                save_turn(session_id, req.query, answer)
+                record_tools(session_id, [t["tool"] for t in trace])
+                record_user_session(caller.principal.username, session_id, req.query)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 # --- Per-user session history (chat-history sidebar) ------------------------------------
