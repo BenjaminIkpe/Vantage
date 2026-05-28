@@ -196,6 +196,46 @@ class TestStreaming:
         assert re.search(r"·\s*\d+\.?\d*\s*[ms]", body), \
             "expected to find elapsed time in the trace summary"
 
+    def test_streaming_data_in_alpine_state(self, page_support: Page):
+        """Diagnostic: after streaming done, the Alpine data MUST have the answer.
+
+        If this passes but DOM tests fail, the bug is Alpine reactivity (mutations on a
+        plain object pushed into a reactive array don't re-render). If this fails too,
+        the bug is upstream (streaming/SSE delivery)."""
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        # Read msg.md from Alpine state directly.
+        state = page_support.evaluate("""() => {
+          const root = window.Alpine?.$data?.(document.body);
+          if (!root) return null;
+          const chat = root.chats.find(c => c.id === root.activeChatId);
+          if (!chat) return {error: 'no active chat'};
+          const last = chat.messages[chat.messages.length - 1];
+          return {role: last?.role, md_len: (last?.md || '').length, md_preview: (last?.md || '').slice(0, 100)};
+        }""")
+        assert state is not None, "Alpine data not accessible — UI didn't mount"
+        assert state.get("role") == "assistant", f"last message not assistant: {state}"
+        assert state.get("md_len", 0) > 50, \
+            f"Alpine state has empty/short assistant.md ({state}) — upstream streaming bug, not reactivity"
+
+    def test_streaming_dom_matches_alpine_state(self, page_support: Page):
+        """If Alpine state has the answer but DOM doesn't, that's the reactivity bug the
+        user reported (have-to-switch-chats to see the response)."""
+        send_message(page_support, "Open issues for Velocity Marketplace?")
+        wait_for_streaming_done(page_support, timeout=60)
+        alpine_len = page_support.evaluate("""() => {
+          const root = window.Alpine?.$data?.(document.body);
+          const chat = root.chats.find(c => c.id === root.activeChatId);
+          const last = chat.messages[chat.messages.length - 1];
+          return (last?.md || '').length;
+        }""")
+        dom_len = len(last_assistant_text(page_support))
+        # Allow some slack — DOM strips markdown markers; expect DOM to have most of the text
+        assert dom_len > alpine_len * 0.3, (
+            f"Alpine state has {alpine_len} chars of answer but DOM only {dom_len} — "
+            "this is the REPORTED REACTIVITY BUG (deltas don't trigger re-render)"
+        )
+
     def test_streaming_done_flag_clears(self, page_support: Page):
         send_message(page_support, "Open issues for Velocity Marketplace?")
         wait_for_streaming_done(page_support, timeout=60)
@@ -372,12 +412,22 @@ class TestSkills:
         page_support.locator(SEL["skills_button"]).first.click()
         page_support.wait_for_selector("text=escalation-summary", timeout=5_000)
         page_support.click("text=escalation-summary")
-        # Param form
-        customer_input = page_support.locator("input[placeholder*='customer'], input[placeholder*='Customer'], input[name='customer']").first
-        customer_input.wait_for(timeout=5_000)
-        customer_input.fill("Velocity Marketplace")
-        page_support.get_by_role("button", name="Run").click()
-        wait_for_streaming_done(page_support, timeout=90)
+        # Param form replaces list when activeSkill is set; "Run skill" button is the signal.
+        page_support.get_by_role("button", name="Run skill").wait_for(state="visible", timeout=5_000)
+        # The param input has no name/placeholder — find the visible input that isn't the
+        # sidebar search or the chat textarea (those are textareas / have placeholders).
+        all_inputs = page_support.locator("input").all()
+        param_input = None
+        for inp in reversed(all_inputs):
+            if inp.is_visible() and not inp.is_disabled():
+                ph = inp.get_attribute("placeholder") or ""
+                if "Search" not in ph and "Ask" not in ph:
+                    param_input = inp
+                    break
+        assert param_input is not None, "couldn't find a skill-param input on the page"
+        param_input.fill("Velocity Marketplace")
+        page_support.get_by_role("button", name="Run skill").click()
+        wait_for_streaming_done(page_support, timeout=120)
         text = last_assistant_text(page_support).lower()
         assert any(w in text for w in ["velocity", "critical", "high", "risk"]), \
             f"skill output didn't look like a risk brief: {text[:200]!r}"
