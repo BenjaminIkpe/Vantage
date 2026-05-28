@@ -30,7 +30,7 @@ updated: 2026-05-27
 ## Repo / flow
 - `main` protected (PR + `ci` required; admin-bypass). `ci.yml` on every PR; `data-ci.yml` on data PRs. Build = feature branch → PR → CI → merge.
 
-## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security: [09-Security](09-Security.md)
+## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security: [09-Security](09-Security.md) · Scaling/RAG: [10-Scaling](10-Scaling.md)
 
 ## Next moves (all Should/Could — Musts are done)
 1. **Minimal chat UI** (Should) — the live-demo multiplier. Include the **chat-history sidebar** (list past chats, resume from one) once core chat works; needs per-user session listing (track session ids per user). *Sketch the UI for sign-off when we start.*
