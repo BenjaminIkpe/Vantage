@@ -78,3 +78,55 @@ def load_tools(session_id: str) -> list[str]:
         return sorted(_redis().smembers(f"session:{session_id}:tools"))
     except Exception:
         return []
+
+
+# --- OIDC auth-session storage (BFF pattern; see app/oidc.py) -----------------------------
+# `oauth_state:{state}` holds the PKCE code_verifier + redirect_uri between /auth/login and
+# /auth/callback (~5 min TTL — covers a slow login). `auth_session:{sid}` holds the
+# verified access token + identity, keyed by the httpOnly cookie value (TTL = token expiry).
+# The access token never reaches the browser.
+
+OAUTH_STATE_TTL = 300        # 5 min
+AUTH_SESSION_TTL = 3600      # 1 hour default; overridden by token expires_in
+
+
+def store_oauth_state(state: str, data: dict, ttl: int = OAUTH_STATE_TTL) -> None:
+    try:
+        _redis().set(f"oauth_state:{state}", json.dumps(data), ex=ttl)
+    except Exception:
+        pass
+
+
+def consume_oauth_state(state: str) -> dict | None:
+    """Read-and-delete the stored PKCE state (one-shot; prevents replay)."""
+    try:
+        key = f"oauth_state:{state}"
+        raw = _redis().get(key)
+        if raw is None:
+            return None
+        _redis().delete(key)
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def store_auth_session(sid: str, data: dict, ttl: int = AUTH_SESSION_TTL) -> None:
+    try:
+        _redis().set(f"auth_session:{sid}", json.dumps(data), ex=ttl)
+    except Exception:
+        pass
+
+
+def load_auth_session(sid: str) -> dict | None:
+    try:
+        raw = _redis().get(f"auth_session:{sid}")
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def delete_auth_session(sid: str) -> None:
+    try:
+        _redis().delete(f"auth_session:{sid}")
+    except Exception:
+        pass

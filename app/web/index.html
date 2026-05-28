@@ -151,7 +151,43 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 <body x-data="vantage()" x-init="init()" x-cloak class="h-full">
-  <div class="grid h-full" style="grid-template-columns: 280px 1fr;">
+
+  <!-- ░░ AUTH GATES ░░ ─────────────────────────────────────────────────────────────
+       authStatus === 'checking' → brief loading state on first paint
+       authStatus === 'guest'    → centred sign-in card; chat is hidden
+       authStatus === 'authed'   → main UI (below) renders normally -->
+  <div x-show="authStatus === 'checking'" class="fixed inset-0 grid place-items-center bg-bg z-50">
+    <div class="text-textsoft text-[13px] flex items-center gap-2">
+      <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.55"/></svg>
+      <span>Checking session…</span>
+    </div>
+  </div>
+
+  <div x-show="authStatus === 'guest'" class="fixed inset-0 grid place-items-center bg-bg z-50 px-4" style="display:none">
+    <div class="w-full max-w-md bg-surface border border-linesoft rounded-lg p-6 shadow-lg">
+      <div class="flex items-center gap-2.5 mb-4">
+        <div class="w-[22px] h-[22px] rounded-md grid place-items-center font-bold text-xs"
+             style="background: linear-gradient(135deg, var(--accent), oklch(0.78 0.12 55)); color: var(--accent-ink);">V</div>
+        <div class="font-semibold tracking-tight">Vantage</div>
+      </div>
+      <h1 class="text-lg font-semibold mb-1.5">Sign in</h1>
+      <p class="text-[13px] text-textsoft leading-relaxed mb-5">
+        Vantage is an internal copilot for Acme Operations staff. Sign in with your Keycloak account to continue.
+        Your access token stays on the server — only an opaque session cookie touches the browser.
+      </p>
+      <button @click="signIn()"
+              class="w-full flex items-center justify-center gap-2 py-2 rounded-md bg-accent text-accentink font-medium text-[13px] hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-accentedge">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4v16h-4M3 12h12M11 8l4 4-4 4"/></svg>
+        <span>Sign in with Keycloak</span>
+      </button>
+      <p class="text-[11px] text-textmuted mt-4 leading-relaxed">
+        Dev users: <span class="font-mono">sales</span> / <span class="font-mono">support</span> / <span class="font-mono">admin-user</span> — passwords match the username (the dev <code>admin-user</code> password is <span class="font-mono">admin</span>).
+      </p>
+    </div>
+  </div>
+
+  <!-- ░░ MAIN APP — only visible once authed ░░ -->
+  <div x-show="authStatus === 'authed'" class="grid h-full" style="grid-template-columns: 280px 1fr; display:none;">
 
     <!-- ░░ SIDEBAR ░░ -->
     <aside class="bg-bg2 border-r border-linesoft flex flex-col min-h-0">
@@ -238,7 +274,7 @@
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
             <span x-text="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"></span>
           </button>
-          <button class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface text-[13px] text-textsoft">
+          <button @click="signOut()" class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface text-[13px] text-textsoft">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4v16h-4"/><path d="M3 12h12M11 8l4 4-4 4"/></svg>
             <span>Sign out</span>
           </button>
