@@ -595,11 +595,17 @@ window.vantage = function () {
       // arrive; tool_start/end events drive the trace expander and the inline "calling…"
       // indicator. The session_id arrives in the very first event so we can adopt it for
       // a new chat before any content lands.
-      const ass = {
+      const assRaw = {
         id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
         streaming: true, currentTool: null, errored: null,
       };
-      chat.messages.push(ass);
+      // CRITICAL: after push, re-bind to the array element — that's Alpine's reactive
+      // proxy. Mutating the local `assRaw` (the pre-push reference) bypasses Alpine's
+      // tracking and the DOM never re-renders — the "have to switch chats to see the
+      // response" bug. Same pattern in runSkill below.
+      chat.messages.push(assRaw);
+      const ass = chat.messages[chat.messages.length - 1];
+
       this.isStreaming = true;
       this.cancelRequested = false;
       ass.currentTool = { tool: "thinking", argPreview: "" };
@@ -782,12 +788,14 @@ window.vantage = function () {
       if (!chat.title) chat.title = `Skill — ${s.name}`;
       this.$nextTick(() => this.scrollToEnd());
 
-      const ass = {
+      const assRaw = {
         id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
         streaming: true, currentTool: { tool: `skill:${s.name}`, argPreview: paramStr },
         errored: null,
       };
-      chat.messages.push(ass);
+      // Re-bind to the reactive proxy after push — same Alpine reactivity gotcha as runAgent.
+      chat.messages.push(assRaw);
+      const ass = chat.messages[chat.messages.length - 1];
       this.isStreaming = true;
 
       try {

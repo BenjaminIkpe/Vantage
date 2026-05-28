@@ -94,7 +94,10 @@
       --run:       oklch(0.50 0.13 220);
     }
 
-    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+    /* App-shell: no page-level scroll. Internal scroll lives on the chat thread + the
+       sidebar's chat list. Without this, CSS-grid items with min-height:auto can grow to
+       fit their content and push the body past viewport — the "page gets longer" bug. */
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
     body { font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'ss01', 'cv11'; }
     .mono, code, pre, kbd { font-family: 'Geist Mono', ui-monospace, monospace; }
     [x-cloak] { display: none !important; }
@@ -187,7 +190,7 @@
   </div>
 
   <!-- ░░ MAIN APP — only visible once authed ░░ -->
-  <div x-show="authStatus === 'authed'" class="grid h-full" style="grid-template-columns: 280px 1fr; display:none;">
+  <div x-show="authStatus === 'authed'" class="grid h-full min-h-0" style="grid-template-columns: 280px 1fr; display:none;">
 
     <!-- ░░ SIDEBAR ░░ -->
     <aside class="bg-bg2 border-r border-linesoft flex flex-col min-h-0">
@@ -283,7 +286,7 @@
     </aside>
 
     <!-- ░░ MAIN ░░ -->
-    <section class="grid min-w-0" style="grid-template-rows: 52px 1fr auto;">
+    <section class="grid min-w-0 min-h-0" style="grid-template-rows: 52px 1fr auto;">
 
       <!-- Header -->
       <header class="flex items-center gap-3 px-5 border-b border-linesoft bg-bg min-w-0">
