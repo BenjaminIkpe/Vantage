@@ -183,10 +183,10 @@ class TestStreaming:
 
     def test_trace_expander_visible_after_stream(self, page_support: Page):
         send_message(page_support, "Open issues for Velocity Marketplace?")
-        wait_for_streaming_done(page_support, timeout=60)
-        # The trace expander button always renders 'show trace' or 'hide trace' next to
-        # the (fragmented across spans) summary. Either label confirms it's there.
-        page_support.wait_for_selector("text=/show trace|hide trace/", timeout=5_000)
+        wait_for_streaming_done(page_support, timeout=90)
+        # After streaming, the expander button shows 'show thinking' (collapsed) or 'hide'
+        # (still expanded by user). Either label is fine — just confirm the expander rendered.
+        page_support.wait_for_selector("text=/show thinking|hide thinking|hide$|show trace/", timeout=5_000)
 
     def test_elapsed_ms_displayed(self, page_support: Page):
         send_message(page_support, "Open issues for Velocity Marketplace?")

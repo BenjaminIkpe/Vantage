@@ -4,9 +4,16 @@
 
 const md = window.markdownit({ html: false, linkify: true, breaks: false, typographer: true });
 
+// Defensively strip pictographic emojis from agent output — the system prompt forbids them,
+// but a belt-and-braces strip keeps the UI consistent regardless of model variance.
+// Range covers: misc symbols + dingbats, emoticons, transport & map symbols, supplemental
+// symbols & pictographs, geometric shapes (full block), variation selectors.
+const EMOJI_RE = /[☀-➿\u{1F300}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{1F000}-\u{1F2FF}️]/gu;
+
 function renderMd(text) {
   if (!text) return "";
-  return window.DOMPurify.sanitize(md.render(text));
+  const cleaned = text.replace(EMOJI_RE, "");
+  return window.DOMPurify.sanitize(md.render(cleaned));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
