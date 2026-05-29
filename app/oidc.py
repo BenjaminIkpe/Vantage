@@ -63,8 +63,16 @@ def gen_sid() -> str:
     return secrets.token_urlsafe(32)
 
 
-def authorize_url(redirect_uri: str, state: str, code_challenge: str) -> str:
-    """Build the Keycloak authorize endpoint URL the browser should be redirected to."""
+def authorize_url(redirect_uri: str, state: str, code_challenge: str,
+                  login_hint: str | None = None, prompt: str | None = None) -> str:
+    """Build the Keycloak authorize endpoint URL the browser should be redirected to.
+
+    `login_hint` pre-fills the username on Keycloak's form (used by the role-switcher to
+    suggest the target persona). `prompt=login` forces Keycloak to re-authenticate even
+    when its SSO cookie still has a valid session — without it, clicking 'switch to admin'
+    would silently sign you back in as the *current* user via SSO. Together they make
+    the role-switcher a real identity swap, not a cosmetic flip.
+    """
     params = {
         "response_type": "code",
         "client_id": CLIENT_ID,
@@ -74,6 +82,10 @@ def authorize_url(redirect_uri: str, state: str, code_challenge: str) -> str:
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    if login_hint:
+        params["login_hint"] = login_hint
+    if prompt:
+        params["prompt"] = prompt
     return f"{KEYCLOAK_PUBLIC_URL}/realms/{REALM}/protocol/openid-connect/auth?{urlencode(params)}"
 
 

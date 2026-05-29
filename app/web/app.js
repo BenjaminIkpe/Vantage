@@ -552,12 +552,26 @@ window.vantage = function () {
     toggleTheme() { this.setTheme(this.theme === "dark" ? "light" : "dark"); },
 
     // role helpers
+    // role-label → persona username. Used by setRole to redirect through /auth/switch
+    // so 'switching roles' is a real identity swap (new JWT, new realm roles) rather
+    // than a cosmetic flip of this.role. See app/main.py:auth_switch.
+    rolePersona: { sales: "priya.nair", support: "marcus.webb", admin: "dana.okafor" },
     setRole(r) {
-      this.role = r;
-      this.flash(`Role switched to ${this.roleLabel(r)} — try a write to see RBAC live.`);
+      if (r === this.role) { this.flash("Already signed in as " + this.roleLabel(r)); return; }
+      const persona = this.rolePersona[r];
+      if (!persona) return;
+      // Hard navigation — clears the BFF session, redirects to Keycloak with login_hint
+      // pre-filled to the chosen persona. User types that persona's password, comes back
+      // with a fresh JWT carrying the new realm roles.
+      window.location.href = `/auth/switch?username=${encodeURIComponent(persona)}`;
     },
     roleLabel(r) { return { sales: "sales", support: "support", admin: "admin" }[r]; },
-    roleSubLabel(r) { return { sales: "read-only", support: "read + update issues", admin: "full access" }[r]; },
+    roleSubLabel(r) {
+      // Show the persona username (the thing you'll be typing the password for) plus a
+      // one-line capability hint — makes the role-switcher honest about what it does.
+      const desc = { sales: "read-only", support: "read + update issues", admin: "full access" }[r];
+      return `${this.rolePersona[r]} · ${desc}`;
+    },
     roleBadgeClass(r) {
       if (r === "admin")   return "border-accentedge text-accent bg-accentsoft";
       if (r === "support") return "border-[oklch(0.66_0.14_220_/_0.4)] text-[oklch(0.78_0.12_220)] bg-[oklch(0.74_0.12_220_/_0.10)]";
