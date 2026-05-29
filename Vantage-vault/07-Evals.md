@@ -24,7 +24,7 @@ Against the running stack (Codespace), with the seed loaded:
 ```bash
 python eval/run_evals.py     # exits non-zero if any case fails
 ```
-Uses the dev ROPC grant for the three role users (`sales` / `support` / `admin-user`); override `API_URL` / `KEYCLOAK_TOKEN_URL` if needed.
+Uses the dev ROPC grant for the three persona logins (`priya.nair` / `priya` for sales, `marcus.webb` / `marcus` for support, `dana.okafor` / `dana` for admin); override `API_URL` / `KEYCLOAK_TOKEN_URL` if needed. The eval scripts hold the role → (username, password) mapping in their `USERS` dict; the role labels in the case rows below (sales / support / admin) stay stable across the Keycloak persona rename (PR #23).
 
 ## Cases
 | # | Query | Role | Expected tool(s) | Expected behaviour | Result |

@@ -2,7 +2,7 @@
 title: NOW — Vantage cursor
 type: cursor
 status: active
-updated: 2026-05-27
+updated: 2026-05-29
 ---
 
 # NOW — where we are
@@ -10,36 +10,38 @@ updated: 2026-05-27
 > [!NOTE] Cursor — overwritten each session; start here. Plain Markdown links (GitHub-renderable).
 
 **Project:** Vantage — agentic assistant for *Acme Operations* (B2B payments). EY Applied AI Engineer take-home.
-**Deadline:** 2026-06-02. One-hour panel follows.
-**Status:** ✅✅ **All brief Musts done + the graded deliverables.** Auth/RBAC (+denial), 5 tools via a custom MCP server, dynamic agent (MCP client), API, Postgres seed, Redis multi-turn memory, the reusable Escalation Summary Skill, Docker one-command — **plus** the **eval set (10/10)**, **observability** (trace + per-tool/total latency + write audit logs), and a full **README + diagram + AI-usage notes**. Beyond the Must: users can **author their own Skills** from a finished session (Flow 1 endpoints); the LLM client now uses the **OpenAI SDK with a swappable `base_url`** so the same code runs Claude/GPT/Gemini with one env-var (PR #16 — true delivery of ADR-001's model-agnostic claim). **Chat UI foundation landed** (this PR) — `app/web/` static page served by FastAPI at `/`, lifted from the Claude Design handoff (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify, dark/light themes, sidebar + trace expander + Skills menu + save-as-skill modal). Backend is **mocked client-side for now**; the next PR wires real OIDC auth + streaming `/ask/stream` + `/sessions` + `/skills/*`. **Remaining is all Should/Could:** real backend wiring, chat-history sidebar (real per-user sessions), `/ask` save-as-skill trigger, Flow 2.
+**Deadline:** 2026-06-02 (4 days). One-hour panel follows.
+**Status:** ✅✅✅ **All brief Musts + the graded deliverables + the Should items shipped.** Auth/RBAC (+denial), 5 + 3 browse tools via a custom MCP server, dynamic agent (MCP client), Postgres seed, Redis multi-turn memory, the reusable Escalation Summary Skill + user-authored Skills, Docker one-command — **plus** the **eval set (10/10)** + **robustness suite (30/30)**, **observability** (trace + per-tool/total latency + write audit logs), full **README + diagram + AI-usage notes**, and **the chat UI is now real end-to-end**: OIDC Auth-Code + PKCE + BFF cookie (PR #18), Alpine.js + Tailwind front-end wired to `/ask/stream` + `/sessions` + `/skills/*` (PR #20), live SSE streaming with token deltas + tool-call events (PR #22), and **persona logins + real role switch + reasoning-in-trace + the "answer disappears" fix** (PR #23). The **75-test Playwright UI suite** passes against the deployed Codespace stack. Remaining is panel-prep + recording.
 
 ## Proven (Codespace, `main`)
-- `docker compose up` → db+redis+keycloak+**mcp**+api healthy; seed 12/40/132/14; auth (support/admin) + 401 on bad tokens.
-- **`POST /ask`** (auth-gated), validated live as `support`, every answer flowing API → agent (MCP client) → MCP server (re-verify + RBAC) → Postgres:
-  - "open issues for Velocity Marketplace" → 4 open, critical→high→medium (one MCP tool call).
-  - **Headline:** "open issues for Velocity, summarise the most urgent, suggest a next action" → agent chained `get_open_issues` → `summarise_issue_history` over MCP; grounded escalation summary (quotes real update bodies — EDD case CDD-4821) + next action. Proves **dynamic tool selection** (ADR-001).
-  - "Calm Waters Subscriptions" → "no open issues" (E3). Earlier: "Lumen"→ambiguous (E2) · "Zzzz"→not found (E1).
-  - **RBAC denial (S3/SU3) proven end-to-end:** as `sales`, "add a note to issue 3" → agent *attempts* `update_issue` (no self-gating) → tool returns `denied` → agent relays the refusal; trace `update_issue->denied`. As `support`, same request → `update_issue->updated` (written + timestamped). Deterministic matrix in `smoke_test.py`: support-updates / sales-denied / admin-next-action / support-denied / admin-updates-next-action.
-  - `POST /ask` with no/invalid token → **401**; `smoke_test.py` confirms the MCP server itself rejects a bad token before any tool runs.
-  - Tool-call `trace` on every answer + server-side **audit log** per write (user/roles/target/decision; identifiers only, T7).
-  - **Multi-turn (X1) proven:** on one `session_id`, "open issues for Velocity" → "summarise the second one" resolved to issue #3 (2nd row) via Redis context → "what next?" answered from context; a fresh `session_id` carried nothing over (asked which customer, no hallucination).
-  - **Skill (S2) proven:** `POST /skills/escalation-summary/run {customer}` as `sales` → Velocity=Critical / Calm Waters=Low / Zzzz=not-found; grounded, persists nothing, only the 2 whitelisted read tools touched. `GET /skills` lists it.
-  - **Skill authoring (Flow 1) proven:** a 2-turn session → `draft-from-session` produced a parameterised draft (`{account_name}`, allowed_tools = tools used) → saved → ran for a new account. Wrong param name correctly rejected.
-  - **User-story acceptance walkthrough (13/13)** + **robustness suite (30/30)** — 30 adversarial / edge probes (typo, single-char, all-caps, whitespace, non-ASCII, prompt-injection, out-of-scope, empty/long/SQL-shaped/special-char inputs, multi-turn weirdness, Skill edge cases). Caught real bugs along the way (next_actions read gap → PR #13; empty-query 502 → 400 in PR #15) and confirmed adversarial probes never produce a successful write as sales — the LLM is *not* the boundary.
-- Tools (5 of 5): reads `get_customer_profile`, `get_open_issues`, `summarise_issue_history` (open to any role); writes `update_issue` (support+admin), `create_next_action` / `update_next_action` (admin). Discovered via MCP; parameterised SQL; writes attributed via `users.keycloak_id = token sub`. Live in `mcp_server/` (dir named to avoid shadowing the `mcp` SDK; compose service is `mcp`).
+- `docker compose up` → db+redis+keycloak+mcp+api healthy; seed 12/40/132/14; auth (3 personas) + 401 on bad tokens.
+- **Personas (live):** logging in via the BFF flow is now real human names — `priya.nair` / `priya` (sales), `marcus.webb` / `marcus` (support), `dana.okafor` / `dana` (admin). Match the seed personas in [02-User-Stories](02-User-Stories.md). The UI's "Sign in as another persona" menu hits `GET /auth/switch?username=<persona>` → BFF clears the Redis session + revokes the Keycloak refresh token + drops the cookie → 302 to `/auth/login?prompt=login&login_hint=<persona>` → Keycloak forces re-auth → new JWT with the new realm roles. **A real identity swap, not a cosmetic flip.**
+- **`POST /ask`** (auth-gated, validated live as each persona) and **`POST /ask/stream`** (SSE — the UI surface): every answer flows API → agent (MCP client) → MCP server (re-verify + RBAC) → Postgres. Tool-call `trace` on every answer + server-side **audit log** per write (user/roles/target/decision; identifiers only, T7).
+  - Hero query "open issues for Velocity, summarise the most urgent, suggest a next action" → 3-tool chain → grounded escalation summary; trace shows `get_customer_profile → get_open_issues → summarise_issue_history` with per-tool ms.
+  - **Multi-turn (X1):** Redis-backed; "summarise the second one" resolves to issue #3.
+  - **Grounding edges (E1/E2/E3):** Zzzz→not_found; Lumen→ambiguous (lists candidates); Calm Waters→no open issues. No invention.
+  - **RBAC end-to-end:** sales→denied (no write), support→updated, admin→create/update next actions. Deterministic matrix in `mcp_server/smoke_test.py`. RBAC at the **tool boundary**, never the prompt (ADR-002).
+  - **Skill (S2):** `POST /skills/escalation-summary/run {customer}` as sales → Velocity=Critical / Calm Waters=Low / Zzzz=not-found; only the 2 whitelisted reads touched.
+  - **Skill authoring (Flow 1):** session → `draft-from-session` → parameterised draft → save → run for a new account.
+  - **User-story acceptance walkthrough (13/13)** + **robustness suite (30/30)** + **eval set (10/10)** all green.
+- **UI shipped + verified by a 75-test Playwright suite (`tests/ui/test_ui.py`)** spanning 14 categories: auth + basic chat + streaming + markdown + multi-turn + sidebar + skills + RBAC + layout + theme + keyboard + a11y + edge-cases + browse-tools. **All 75 passing** against the deployed Codespace.
+  - **Streaming**: SSE `text` / `tool_start` / `tool_end` / `done` events; UI renders tokens as they arrive; "calling X(…)" indicator while a tool is in flight.
+  - **Reasoning in the trace**: per-message `timeline` interleaves the model's pre-tool narration (italic "thought" blocks) with the tool-call pills. Click **show thinking** to expand. Only the *final-iteration* text remains in the answer area — preface narration is retracted on `tool_start` (system prompt nudges the model to write 1–2 sentence intent before each call).
+  - **"Answer disappears" bug fixed**: `loadSessions()` now MERGES (preserve existing chat objects by id, add new ids, drop removed ones) instead of wholesale-replacing `this.chats` — the prior behaviour wiped just-streamed assistant turns from memory.
+  - **No emojis in agent output**: system prompt forbids them; defensive `EMOJI_RE` strip in `renderMd()` as belt-and-braces. Verified emoji-free.
+- Tools (8 of 8): reads `get_customer_profile`, `get_open_issues`, `summarise_issue_history` (any role); writes `update_issue` (support+admin), `create_next_action` / `update_next_action` (admin); **browse** `list_customers`, `list_issues`, `list_next_actions` (filterable + paginated, PR #21). Discovered via MCP; parameterised SQL; writes attributed via `users.keycloak_id = token sub`. Live in `mcp_server/`.
 
 ## Repo / flow
-- `main` protected (PR + `ci` required; admin-bypass). `ci.yml` on every PR; `data-ci.yml` on data PRs. Build = feature branch → PR → CI → merge.
+- `main` protected (PR + `ci` required; admin-bypass for docs/cursor only). Last 5 PRs merged on `main`: #18 (OIDC + BFF), #20 (UI ↔ real backend), #21 (browse tools), #22 (SSE streaming), #23 (personas + role switch + reasoning + fixes). All CI green incl. CodeQL × 3.
+- Build flow: feature branch → PR → CI → merge. Never edit code on `main` directly.
 
 ## Decisions: ADR-001…007 ([05-Decisions](05-Decisions/)) · Security: [09-Security](09-Security.md) · Scaling/RAG: [10-Scaling](10-Scaling.md)
 
-## Next moves (all Should/Could — Musts are done)
-1. **Minimal chat UI** (Should) — the live-demo multiplier. Include the **chat-history sidebar** (list past chats, resume from one) once core chat works; needs per-user session listing (track session ids per user). *Sketch the UI for sign-off when we start.*
-2. **`/ask` "save this as a skill" trigger** (Should, Flow 1 PR B) — conversational counterpart to the authoring endpoints (local `save_skill` tool in the loop).
-3. **Flow 2** (Could) — guided/interview skill authoring with role-aware suggestions.
-4. Polish: bonus tracing (OpenTelemetry/Phoenix), streaming, cache-aside for `get_customer_profile`.
+## Next moves (panel-prep, all Could)
+1. **Panel-day rehearsal** — record a screen-capture as a fallback in case Codespaces is flaky on the day; rehearse the 5-minute demo path (login as Marcus → hero query → "show thinking" panel → role-switch to Dana → write a next action → role-switch to Priya → see denial → save-as-skill).
+2. **Optional polish** (skip if time is short): OpenTelemetry / Phoenix tracing export; cache-aside for `get_customer_profile`; `/ask` "save this as a skill" trigger (Flow 1 PR B) as a local agent tool; Flow 2 (guided/interview skill authoring with role-aware suggestions).
+3. **Panel-prep doc** — re-read [08-Panel-Prep](08-Panel-Prep.md) and pad the answers for "where would this break first under scale" and "show me where RBAC is enforced".
 
 ## Open questions
-- `/ask` save-skill trigger: give the agent a local `save_skill` tool (clean, agentic) vs intent-routing in main.py (hacky). Lean local tool — means run_agent must dispatch local tools alongside MCP tools (only on the /ask path, not skill runs).
-- Drafter param naming: LLM picks the param name (`account_name`); consider nudging toward conventional names (`customer`) for guessability.
-- Demo-day rehearsal on Codespaces (idle 90m; screen-recording fallback; transient Docker-in-Docker "file exists" shim error → `docker compose down --remove-orphans` then `up`).
+- Stretch: is it worth recording a 2-min "guided tour" video to embed in the submission README, or rely on the live demo?
+- Demo-day fallback: confirm screen-recording rig + a second Codespace as warm standby (90m idle timeout — `gh codespace ssh` keeps it alive).
