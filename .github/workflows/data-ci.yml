@@ -22,6 +22,10 @@ on:
       - 'scripts/**'
       - '.github/workflows/data-ci.yml'
 
+# Least-privilege GITHUB_TOKEN: this job only reads the repo + runs tests in a service container.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
