@@ -21,7 +21,7 @@ The brief requires the database seeded with representative data sufficient to de
 - **Claude** owns the *text* — realistic issue descriptions and believable multi-update histories (what the agent must summarise).
 - Domain = Acme as a B2B payments platform ([01-Frame](../01-Frame.md)); categories + risk per [04-Architecture](../04-Architecture.md).
 - **Planted eval scenarios:** E1 (a customer name deliberately absent → "not found"), E2 (two near-identical customers), E3 (a customer with zero open issues), plus a clearly High/Critical account for the escalation story.
-- Volume: ~12 customers, ~40 issues, ~120 updates, ~15 next-actions, one user per role.
+- Volume (committed seed; verified by `db/tests/test_data_layer.py`): **12 customers, 40 issues, 132 updates, 14 next-actions, 3 users** (one per persona — Priya/Marcus/Dana).
 
 ## Alternatives considered
 - **Pure LLM-generated dataset.** Rejected — LLMs don't preserve referential integrity across tables and can invent unrealistic values. Used only for text, inside a Faker-owned structure.

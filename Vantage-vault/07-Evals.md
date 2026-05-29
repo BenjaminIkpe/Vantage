@@ -39,8 +39,11 @@ Uses the dev ROPC grant for the three persona logins (`priya.nair` / `priya` for
 | 8 | "open issues for Velocity" → "summarise **the second one**" | support | (turn 2) `summarise_issue_history` | reference resolved from **Redis** session (X1) | ✅ |
 | 9 | Skill `escalation-summary {customer: Velocity}` | sales | `get_open_issues` (+history) | risk level + advice; read-only Skill (S2) | ✅ |
 | 10 | `POST /ask` with **no token** | — | — | **HTTP 401** (auth required, T1) | ✅ |
+| 11 | "Who are our customers? Show me a few." | sales | `list_customers` | browse: list (no specific id known) | ✅ |
+| 12 | "Show me all critical open issues across customers." | support | `list_issues` (priority=critical, status=open) | browse: cross-customer triage by filter | ✅ |
+| 13 | "What overdue next actions do we have?" | admin | `list_next_actions` (overdue=True) | admin oversight: surface overdue directives | ✅ |
 
-**Latest run: 10 / 10 passed** (Codespace, against the committed seed).
+**Latest run: 13 / 13 passed** (Codespace, against the committed seed). Cases 1–10 are the brief-required scenarios; 11–13 are the **browse tools** added in PR #21 (the realistic v1 expansion — users who don't have a specific customer or issue id in mind).
 
 > [!TIP] Includes the negative case
 > Case 6 (a `sales_user` trying to update an issue) is the brief's required **denied** case — it proves the *tool* enforces RBAC on the re-verified role, not the prompt: the agent attempts the tool and relays the refusal.

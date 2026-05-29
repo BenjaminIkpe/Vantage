@@ -32,8 +32,10 @@ updated: 2026-05-27
 ## The agent
 Minimal single-agent tool-calling loop (ADR-001): question → Claude selects tool(s) → tool runs (RBAC-checked) → result → repeat → answer. The model call sits behind a thin adapter for provider-agnosticism.
 
-## Tools (the five)
-`get_customer_profile` · `get_open_issues` · `summarise_issue_history` · `update_issue` · `create`/`update_next_action`. Standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
+## Tools (9 exposed via MCP)
+**Named (the brief's five)** — `get_customer_profile` · `get_open_issues` · `summarise_issue_history` · `update_issue` · `create_next_action` / `update_next_action`.
+**Browse (PR #21, post-brief)** — `list_customers` · `list_issues` · `list_next_actions` (filterable + paginated; the realistic v1 expansion for "who are our customers / what's overdue / what's critical this week" queries where the user has no specific id in mind).
+All are standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
 
 ## Skills (reusable, named capabilities)
 A **Skill** is a packaged, reusable capability — the Anthropic Agent-Skill pattern, embodied here as a small JSON file: `{name, description, instructions, parameters[], allowed_tools[]}`. Running a Skill *reuses the agent loop*: the skill's instructions become the system prompt and `allowed_tools` restricts the toolset — **least privilege on top of** the per-tool RBAC. A Skill is *just a prompt + a tool whitelist*, so even a user-authored skill can never exceed the caller's permissions (the dividend of keeping RBAC in the tools, not the prompt).
