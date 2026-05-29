@@ -1,4 +1,5 @@
 """Vantage API — auth-gated entry point. See Vantage-vault/04-Architecture.md."""
+import logging
 import os
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from session import (
 from skills import draft_from_session, get_skill, load_skills, run_skill, save_skill
 
 app = FastAPI(title="Vantage API")
+logger = logging.getLogger("vantage.api")
 
 # Static chat UI — lifted from the Claude Design handoff (see Vantage-vault/04-Architecture.md
 # § "The UI"). Mocked routing in web/app.js will be replaced by real backend calls (auth-code
@@ -49,6 +51,11 @@ if _WEB_DIR.is_dir():
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")
 REALM = os.getenv("KEYCLOAK_REALM", "vantage")
+
+# The demo's three fixed personas (sales / support / admin). /auth/switch only ever targets
+# one of these, so validating against this allow-list keeps an attacker-supplied `username`
+# out of the 302 redirect (defence in depth — CodeQL py/url-redirection).
+_SWITCHABLE_PERSONAS = {"priya.nair", "marcus.webb", "dana.okafor"}
 
 
 @app.get("/health")
@@ -132,6 +139,8 @@ async def auth_switch(username: str, vantage_sid: str | None = Cookie(default=No
     instead of flipping a client-side variable — that one was cosmetic and misled viewers
     into thinking they'd escalated privilege when they hadn't (security was fine, UX wasn't).
     """
+    if username not in _SWITCHABLE_PERSONAS:
+        raise HTTPException(status_code=400, detail="unknown persona")
     from urllib.parse import quote
     if vantage_sid:
         # Best-effort revoke the Keycloak refresh token + delete our session blob so the
@@ -157,16 +166,18 @@ async def auth_callback(code: str, state: str):
         raise HTTPException(status_code=400, detail="invalid or expired OAuth state")
     try:
         tokens = await oidc.exchange_code(code, stored["redirect_uri"], stored["code_verifier"])
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"token exchange failed: {exc}")
+    except Exception:
+        logger.exception("OIDC token exchange failed")
+        raise HTTPException(status_code=502, detail="token exchange failed")
 
     access_token = tokens["access_token"]
     # Verify here so a malformed token surfaces immediately (and the same verifier the MCP
     # boundary uses — no trust-on-issuance).
     try:
         principal = verify_access_token(access_token)
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"received-token verify failed: {exc}")
+    except Exception:
+        logger.exception("received-token verification failed")
+        raise HTTPException(status_code=401, detail="received-token verification failed")
 
     sid = oidc.gen_sid()
     ttl = int(tokens.get("expires_in", 3600))
@@ -269,8 +280,9 @@ async def ask_stream(req: AskRequest, caller: Authed = Depends(authed)):
                 if event["type"] == "done":
                     trace = event.get("trace", [])
                 yield f"event: {event['type']}\ndata: {_json.dumps(event, default=str)}\n\n"
-        except Exception as exc:
-            yield f"event: error\ndata: {_json.dumps({'detail': str(exc)})}\n\n"
+        except Exception:
+            logger.exception("error in /ask/stream (session=%s)", session_id)
+            yield f"event: error\ndata: {_json.dumps({'detail': 'internal error — please try again'})}\n\n"
         finally:
             # Persist regardless of whether the stream finished cleanly — partial answers
             # are still real conversation context.
