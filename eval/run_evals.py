@@ -1,6 +1,6 @@
 """Vantage evaluation harness (run against the live stack).
 
-Ten cases that prove the assistant works on the dimensions the brief asks for: the right
+Thirteen cases that prove the assistant works on the dimensions the brief asks for: the right
 tool(s) are selected, answers are grounded in the data (never invented), RBAC is respected
 (allowed *and* denied), multi-turn context resolves, and the reusable Skill works. Cases are
 derived from the acceptance criteria in 02-User-Stories.md / 07-Evals.md.

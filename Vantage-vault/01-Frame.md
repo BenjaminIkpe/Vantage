@@ -35,7 +35,7 @@ These split into two jobs: **reactive support** (work the issue queue) and **pro
 - [x] Agent selects tools dynamically; answers grounded in the database; unhappy paths (not-found, ambiguous name) handled **without inventing data**.
 - [x] Holds context across a multi-turn session (Redis).
 - [x] RBAC demonstrably enforced — including at least one *denied* case.
-- [x] Eval set (5–10 questions) passes, with documented results (10/10 — [07-Evals](07-Evals.md)).
+- [x] Eval set (5–10 questions) passes, with documented results (13/13 — [07-Evals](07-Evals.md)).
 - [x] Every design choice defensible in the panel (logged as ADRs).
 
 ## Primary users

@@ -58,7 +58,7 @@ It does **not** hold:
 Source platforms have started exposing their own context layers **over MCP** — Atlassian's Teamwork Graph already exposes via MCP to Microsoft Copilot. The realistic shape isn't "Vantage writes 10 connectors":
 
 ```
-Vantage  --MCP-->  Vantage's own MCP server  (today's 5 named tools)
+Vantage  --MCP-->  Vantage's own MCP server  (today's 9 named tools)
          --MCP-->  Atlassian MCP server       (Teamwork Graph)
          --MCP-->  Salesforce / Zendesk MCP   (when they ship)
          --MCP-->  Acme's in-house ops MCP    (custom internal tools)
