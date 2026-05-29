@@ -273,8 +273,10 @@ class TestStreaming:
 
 class TestMarkdown:
     def test_tables_render_as_html_table(self, page_support: Page):
-        send_message(page_support, "Open issues for Velocity Marketplace?")
-        wait_for_streaming_done(page_support, timeout=60)
+        # Hero query reliably triggers the multi-issue table output (short variants
+        # occasionally come back as a plain-prose answer with no table).
+        send_message(page_support, "Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action.")
+        wait_for_streaming_done(page_support, timeout=120)
         # A <table> should be present inside an assistant `.md` container
         tables = page_support.locator(".md table").count()
         assert tables >= 1, "expected at least one rendered <table> in the assistant answer"
