@@ -6,6 +6,36 @@ The agent reasons over a small set of **named, RBAC-checked tools** exposed by a
 
 > Design rationale, ADRs, threat model, and the build log live in [`Vantage-vault/`](Vantage-vault/) — start at [`00-NOW.md`](Vantage-vault/00-NOW.md).
 
+## Getting started (5 minutes)
+
+You need **Docker** (Docker Desktop on macOS/Windows, or Docker Engine on Linux) and an **`ANTHROPIC_API_KEY`** — bring your own; the app calls Claude via the Anthropic API. No other prerequisites.
+
+```bash
+git clone <this repo>
+cd Vantage
+cp .env.example .env
+# edit .env and set: ANTHROPIC_API_KEY=sk-ant-...
+docker compose up --build      # db + redis + keycloak + mcp + api
+```
+
+First boot takes ~60s (Keycloak imports the realm, Postgres loads the seed). Check readiness: `curl localhost:8000/ready`.
+
+**Open <http://localhost:8000/>** and sign in via Keycloak as one of the three demo personas — they correspond to the three roles in the user stories:
+
+| Role | Username | Password | What they can do |
+|---|---|---|---|
+| Sales | `priya.nair` | `priya` | read customer profiles + open issues + history |
+| Support | `marcus.webb` | `marcus` | reads + `update_issue` (notes / status) |
+| Admin | `dana.okafor` | `dana` | reads + writes + `create_next_action` / `update_next_action` |
+
+A good first query to type into the chat as **Marcus**:
+
+> *Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action.*
+
+You should see tokens stream in, then click **show thinking** under the answer to see the agent's reasoning interleaved with the tools it called (`get_customer_profile` → `get_open_issues` → `summarise_issue_history`) and per-tool latency. Use **Sign in as another persona** in the bottom-left menu to swap to Priya or Dana — that's a real OIDC re-auth, not a UI flip, so trying an admin-only write as Priya will be **denied at the tool boundary** (the trace shows the deny).
+
+> Prefer zero-install? This repo has a `.devcontainer/` — opening it as a **GitHub Codespace** runs the same `docker compose up` inside a hosted VM (set `ANTHROPIC_API_KEY` as a Codespace secret in repo Settings first).
+
 ## Architecture
 
 ```mermaid
@@ -50,18 +80,14 @@ Reusable, named capabilities (the Anthropic *Agent Skill* pattern, packaged here
 - Seeded: **Customer Escalation Summary** — risk level + rationale + recommended next action (advice) + missing info; read-only, persists nothing.
 - Users can **author their own** by turning a finished session into a skill (`POST /skills/draft-from-session` → review → `POST /skills`).
 
-## Run it (one command)
-Requires Docker and an `ANTHROPIC_API_KEY`.
-```bash
-cp .env.example .env          # then set ANTHROPIC_API_KEY in .env
-docker compose up --build     # db + redis + keycloak + mcp + api
-```
-Postgres loads `db/schema.sql` then `db/seed.sql` on first init. Check readiness: `curl localhost:8000/ready`.
+## Chat UI
 
-### Chat UI
-Open **<http://localhost:8000/>** in a browser. Single-page chat (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify) — sidebar of past chats, per-message tool-trace expander, Skills menu, "save as skill" affordance, dark/light themes. **PR foundation: backend is currently mocked client-side**; the next PR wires the real OIDC auth + streaming `/ask/stream` + `/sessions` + `/skills/*` endpoints documented below.
+Single-page chat (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify, no build step) served by FastAPI at `/`. Streaming SSE token-by-token via `/ask/stream`; per-message **show thinking** panel interleaves the model's pre-tool reasoning with each tool-call pill + per-tool latency; sidebar of past chats (one per OIDC user, Redis-backed); Skills menu; **save as skill** authoring affordance; dark/light themes; full keyboard support (`⌘N` new chat, `⌘K` skills, Enter to send).
 
-### Get a token + ask (dev)
+## Hit the API directly (without the UI)
+
+Useful for scripting, evals, or sanity-checking the agent loop. The dev-only ROPC password grant gets you a JWT:
+
 ```bash
 TOKEN=$(curl -s http://localhost:8080/realms/vantage/protocol/openid-connect/token \
   -d grant_type=password -d client_id=vantage-api -d client_secret=vantage-secret \
@@ -71,13 +97,17 @@ curl -s -X POST http://localhost:8000/ask -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"query":"Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action."}'
 ```
-Dev users (persona names from the vault stories): `priya.nair`/`priya` (sales), `marcus.webb`/`marcus` (support), `dana.okafor`/`dana` (admin).
+
+The browser flow uses real **OIDC Auth-Code + PKCE + BFF cookie** (the access token never reaches the browser); the password grant above is dev-only.
 
 ### Endpoints
-- `POST /ask` `{query, session_id?}` — ask the agent; returns `{answer, trace, elapsed_ms, session_id}`. Reuse `session_id` for multi-turn.
+- `POST /ask` `{query, session_id?}` — non-streaming; returns `{answer, trace, elapsed_ms, session_id}`. Used by the eval harness for deterministic assertions.
+- `POST /ask/stream` `{query, session_id?}` — Server-Sent Events: `session` → `text` (deltas) → `tool_start` → `tool_end` → `done`. The UI surface.
+- `GET /sessions` · `GET /sessions/{id}` · `DELETE /sessions/{id}` — the calling user's chat history.
 - `GET /skills` · `POST /skills/{name}/run` `{params}` — list / invoke Skills.
 - `POST /skills/draft-from-session` · `POST /skills` — author a Skill from a session, then save.
-- `GET /whoami` · `GET /health` · `GET /ready`.
+- `GET /auth/login` · `GET /auth/callback` · `GET /auth/logout` · `GET /auth/switch?username=<persona>` · `GET /auth/whoami` — the BFF auth surface.
+- `GET /health` · `GET /ready`.
 
 ## Security
 JWT fully verified (signature/issuer/expiry, `alg` pinned); RBAC at the tool boundary, re-verified by the MCP server; parameterised SQL only (no raw-SQL tool); audit logs record identifiers + actions, never tokens or PII. Threat model + dev→prod hardening: [`09-Security.md`](Vantage-vault/09-Security.md).
