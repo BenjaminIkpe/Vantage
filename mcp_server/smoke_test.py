@@ -77,9 +77,12 @@ async def read_checks(token: str):
 
 async def write_matrix():
     """The brief's RBAC matrix at the tool boundary — deterministic, no LLM."""
-    support = get_token("support", "support")
-    sales = get_token("sales", "sales")
-    admin = get_token("admin-user", "admin")
+    # Persona logins (renamed from sales/support/admin-user to match the seed personas
+    # in Vantage-vault/02-User-Stories.md). Passwords are the first name for demo
+    # discoverability.
+    support = get_token("marcus.webb", "marcus")
+    sales = get_token("priya.nair", "priya")
+    admin = get_token("dana.okafor", "dana")
 
     async def call(token, name, args):
         return _payload(await _with_session(token, lambda s: s.call_tool(name, args)))
@@ -123,7 +126,7 @@ async def expect_rejected():
 
 
 async def main():
-    await read_checks(get_token("support", "support"))
+    await read_checks(get_token("marcus.webb", "marcus"))
     await write_matrix()
     if not await expect_rejected():
         raise SystemExit(1)

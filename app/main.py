@@ -106,13 +106,47 @@ def _public_base(request: Request) -> str:
 
 
 @app.get("/auth/login")
-def auth_login(request: Request):
-    """Start the OIDC Auth-Code + PKCE flow — redirect the browser to Keycloak's login."""
+def auth_login(request: Request, login_hint: str | None = None, prompt: str | None = None):
+    """Start the OIDC Auth-Code + PKCE flow — redirect the browser to Keycloak's login.
+
+    Optional `login_hint` pre-fills the username; `prompt=login` forces re-auth (used by
+    the role-switcher in the UI to make 'switch to admin' a real identity swap, not a
+    silent SSO bounce back as the same user).
+    """
     code_verifier, code_challenge = oidc.gen_pkce()
     state = oidc.gen_state()
     redirect_uri = f"{_public_base(request)}/auth/callback"
     store_oauth_state(state, {"code_verifier": code_verifier, "redirect_uri": redirect_uri})
-    return RedirectResponse(oidc.authorize_url(redirect_uri, state, code_challenge), status_code=302)
+    return RedirectResponse(
+        oidc.authorize_url(redirect_uri, state, code_challenge,
+                           login_hint=login_hint, prompt=prompt),
+        status_code=302,
+    )
+
+
+@app.get("/auth/switch")
+async def auth_switch(username: str, vantage_sid: str | None = Cookie(default=None)):
+    """Role-switch helper: clear the current BFF session and redirect to Keycloak with
+    `prompt=login` + `login_hint=<persona>` so the user re-authenticates as a different
+    persona (real JWT, real roles). The role-switcher menu in the UI hits this endpoint
+    instead of flipping a client-side variable — that one was cosmetic and misled viewers
+    into thinking they'd escalated privilege when they hadn't (security was fine, UX wasn't).
+    """
+    from urllib.parse import quote
+    if vantage_sid:
+        # Best-effort revoke the Keycloak refresh token + delete our session blob so the
+        # old identity is fully gone before the new one is minted.
+        sess = load_auth_session(vantage_sid)
+        if sess and sess.get("refresh_token"):
+            try:
+                await oidc.revoke_session(sess["refresh_token"])
+            except Exception:
+                pass
+        delete_auth_session(vantage_sid)
+    target = f"/auth/login?prompt=login&login_hint={quote(username)}"
+    resp = RedirectResponse(target, status_code=302)
+    resp.delete_cookie(_COOKIE_NAME, path="/")
+    return resp
 
 
 @app.get("/auth/callback")

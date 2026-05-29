@@ -30,15 +30,23 @@ TOKEN_URL = os.getenv(
     "KEYCLOAK_TOKEN_URL",
     "http://localhost:8080/realms/vantage/protocol/openid-connect/token",
 )
-USERS = {"sales": "sales", "support": "support", "admin": "admin-user"}  # role -> username
+# role → (keycloak_username, password). Personas match the seed stories — the username
+# changes shape (`sales` → `priya.nair`), but the role-key in this script stays the same so
+# the scenarios below don't need to know about the rename.
+USERS = {
+    "sales":   ("priya.nair",  "priya"),
+    "support": ("marcus.webb", "marcus"),
+    "admin":   ("dana.okafor", "dana"),
+}
 
 
 # --- HTTP helpers ------------------------------------------------------------
 
 def token(role: str) -> str:
+    username, password = USERS[role]
     data = urllib.parse.urlencode({
         "grant_type": "password", "client_id": "vantage-api", "client_secret": "vantage-secret",
-        "username": USERS[role], "password": role,
+        "username": username, "password": password,
     }).encode()
     with urllib.request.urlopen(TOKEN_URL, data=data) as r:
         return json.loads(r.read())["access_token"]

@@ -3,41 +3,74 @@
   "enabled": true,
   "roles": {
     "realm": [
-      { "name": "sales_user", "description": "Read-only: customers + issues" },
-      { "name": "support_user", "description": "Read + update issues" },
-      { "name": "admin", "description": "Full access incl. next actions" }
+      {
+        "name": "sales_user",
+        "description": "Read-only: customers + issues"
+      },
+      {
+        "name": "support_user",
+        "description": "Read + update issues"
+      },
+      {
+        "name": "admin",
+        "description": "Full access incl. next actions"
+      }
     ]
   },
   "users": [
     {
       "id": "11111111-1111-4111-8111-111111111111",
-      "username": "sales",
+      "username": "priya.nair",
       "enabled": true,
-      "email": "sales@acme.test",
+      "email": "priya.nair@acme.test",
       "firstName": "Priya",
       "lastName": "Nair",
-      "credentials": [{ "type": "password", "value": "sales", "temporary": false }],
-      "realmRoles": ["sales_user"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "priya",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "sales_user"
+      ]
     },
     {
       "id": "22222222-2222-4222-8222-222222222222",
-      "username": "support",
+      "username": "marcus.webb",
       "enabled": true,
-      "email": "support@acme.test",
+      "email": "marcus.webb@acme.test",
       "firstName": "Marcus",
       "lastName": "Webb",
-      "credentials": [{ "type": "password", "value": "support", "temporary": false }],
-      "realmRoles": ["support_user"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "marcus",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "support_user"
+      ]
     },
     {
       "id": "33333333-3333-4333-8333-333333333333",
-      "username": "admin-user",
+      "username": "dana.okafor",
       "enabled": true,
-      "email": "admin@acme.test",
+      "email": "dana.okafor@acme.test",
       "firstName": "Dana",
       "lastName": "Okafor",
-      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
-      "realmRoles": ["admin"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dana",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin"
+      ]
     }
   ],
   "clients": [
@@ -49,8 +82,12 @@
       "secret": "vantage-secret",
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["*"],
-      "webOrigins": ["*"]
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [
+        "*"
+      ]
     }
   ]
 }

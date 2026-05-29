@@ -94,7 +94,10 @@
       --run:       oklch(0.50 0.13 220);
     }
 
-    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+    /* App-shell: no page-level scroll. Internal scroll lives on the chat thread + the
+       sidebar's chat list. Without this, CSS-grid items with min-height:auto can grow to
+       fit their content and push the body past viewport — the "page gets longer" bug. */
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
     body { font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'ss01', 'cv11'; }
     .mono, code, pre, kbd { font-family: 'Geist Mono', ui-monospace, monospace; }
     [x-cloak] { display: none !important; }
@@ -187,7 +190,7 @@
   </div>
 
   <!-- ░░ MAIN APP — only visible once authed ░░ -->
-  <div x-show="authStatus === 'authed'" class="grid h-full" style="grid-template-columns: 280px 1fr; display:none;">
+  <div x-show="authStatus === 'authed'" class="grid h-full min-h-0" style="grid-template-columns: 280px 1fr; display:none;">
 
     <!-- ░░ SIDEBAR ░░ -->
     <aside class="bg-bg2 border-r border-linesoft flex flex-col min-h-0">
@@ -257,7 +260,7 @@
         <div x-show="showUserMenu" x-transition.opacity.duration.100ms
              class="absolute bottom-full right-2 mb-2 w-[260px] bg-bg border border-line rounded-lg p-2 z-30 shadow-2xl"
              style="box-shadow: 0 12px 32px rgba(0,0,0,0.4);">
-          <div class="px-2 pt-1 pb-2 text-2xs uppercase tracking-wider text-textmuted mono">Switch role (demo)</div>
+          <div class="px-2 pt-1 pb-2 text-2xs uppercase tracking-wider text-textmuted mono" title="Clicking a role signs you out and back in as that persona — a real JWT swap, not a UI flip.">Sign in as another persona</div>
           <template x-for="r in ['sales','support','admin']" :key="r">
             <button @click="setRole(r); showUserMenu = false"
               class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-surface text-[13px]"
@@ -283,7 +286,7 @@
     </aside>
 
     <!-- ░░ MAIN ░░ -->
-    <section class="grid min-w-0" style="grid-template-rows: 52px 1fr auto;">
+    <section class="grid min-w-0 min-h-0" style="grid-template-rows: 52px 1fr auto;">
 
       <!-- Header -->
       <header class="flex items-center gap-3 px-5 border-b border-linesoft bg-bg min-w-0">
@@ -399,7 +402,10 @@
                       </div>
                     </template>
 
-                    <!-- Trace expander -->
+                    <!-- "Thinking" panel — collapsible. Click to see the model's reasoning
+                         (text it produced before each tool call) interleaved with the tool
+                         calls themselves, plus per-step status + ms. Stays collapsed by
+                         default; user opens it when they want to peek. -->
                     <template x-if="(msg.trace && msg.trace.length) || msg.streaming">
                       <div class="mt-3 border border-linesoft rounded-lg overflow-hidden" style="background: oklch(0.17 0.008 60);" x-data="{ open: msg.deniedTrace ? true : false }" :data-open="open">
                         <button @click="open = !open" class="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-textsoft hover:bg-surface text-left">
@@ -419,20 +425,30 @@
                               </span>
                             </template>
                           </span>
-                          <span class="ml-auto mono text-2xs text-textmuted" x-text="open ? 'hide' : 'show trace'"></span>
+                          <span class="ml-auto mono text-2xs text-textmuted" x-text="open ? 'hide' : 'show thinking'"></span>
                         </button>
-                        <div x-show="open && msg.trace && msg.trace.length > 0" class="border-t border-linesoft py-1.5">
-                          <template x-for="(call, i) in msg.trace" :key="i">
-                            <div class="grid items-center gap-2.5 px-3.5 py-1.5 mono text-[11.5px]" style="grid-template-columns: 14px 1fr auto;">
-                              <span class="text-textmuted">→</span>
-                              <span class="truncate min-w-0">
-                                <span class="text-text" x-text="call.tool"></span><span class="text-textmuted">(</span><span style="color: oklch(0.78 0.06 45);" x-text="call.argPreview"></span><span class="text-textmuted">)</span>
-                              </span>
-                              <span class="flex items-center gap-2">
-                                <span class="px-1.5 py-px rounded text-2xs"
-                                      :class="traceStatusClass(call.status)" x-text="call.status"></span>
-                                <span class="text-textmuted text-[11px]" x-text="call.ms + 'ms'"></span>
-                              </span>
+                        <!-- Body: iterate over the timeline (interleaved thoughts + tool calls).
+                             Restored sessions (loaded from /sessions/{id}) have no timeline —
+                             fall back to msg.trace so they still render as a tool list. -->
+                        <div x-show="open && ((msg.timeline && msg.timeline.length) || (msg.trace && msg.trace.length))" class="border-t border-linesoft py-1.5">
+                          <template x-for="(entry, i) in ((msg.timeline && msg.timeline.length) ? msg.timeline : (msg.trace || []).map(t => ({ ...t, kind: 'tool' })))" :key="i">
+                            <div>
+                              <template x-if="entry.kind === 'thought'">
+                                <div class="px-3.5 py-1.5 text-[12px] text-textsoft leading-snug italic whitespace-pre-wrap" x-text="entry.text"></div>
+                              </template>
+                              <template x-if="entry.kind === 'tool' || !entry.kind">
+                                <div class="grid items-center gap-2.5 px-3.5 py-1.5 mono text-[11.5px]" style="grid-template-columns: 14px 1fr auto;">
+                                  <span class="text-textmuted">→</span>
+                                  <span class="truncate min-w-0">
+                                    <span class="text-text" x-text="entry.tool"></span><span class="text-textmuted">(</span><span style="color: oklch(0.78 0.06 45);" x-text="entry.argPreview"></span><span class="text-textmuted">)</span>
+                                  </span>
+                                  <span class="flex items-center gap-2">
+                                    <span class="px-1.5 py-px rounded text-2xs"
+                                          :class="traceStatusClass(entry.status)" x-text="entry.status"></span>
+                                    <span class="text-textmuted text-[11px]" x-text="entry.ms + 'ms'"></span>
+                                  </span>
+                                </div>
+                              </template>
                             </div>
                           </template>
                         </div>

@@ -4,9 +4,16 @@
 
 const md = window.markdownit({ html: false, linkify: true, breaks: false, typographer: true });
 
+// Defensively strip pictographic emojis from agent output — the system prompt forbids them,
+// but a belt-and-braces strip keeps the UI consistent regardless of model variance.
+// Range covers: misc symbols + dingbats, emoticons, transport & map symbols, supplemental
+// symbols & pictographs, geometric shapes (full block), variation selectors.
+const EMOJI_RE = /[☀-➿\u{1F300}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{1F000}-\u{1F2FF}️]/gu;
+
 function renderMd(text) {
   if (!text) return "";
-  return window.DOMPurify.sanitize(md.render(text));
+  const cleaned = text.replace(EMOJI_RE, "");
+  return window.DOMPurify.sanitize(md.render(cleaned));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -332,12 +339,22 @@ window.vantage = function () {
     role: "admin",   // active-role key the UI binds to; reset from /auth/whoami
     get user() {
       if (this.me) {
-        const initials = (this.me.username || "?").slice(0, 2).toUpperCase();
-        return { name: this.me.username, initials, email: `${this.me.username}@acme.test` };
+        // Persona usernames are `first.last` (priya.nair, marcus.webb, dana.okafor) — split
+        // on the dot and Title-Case each part so the sidebar shows "Marcus Webb", not
+        // "marcus.webb". Falls back to the raw username for any non-conforming login.
+        const u = this.me.username || "?";
+        const parts = u.split(".");
+        const name = parts.length >= 2
+          ? parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(" ")
+          : u;
+        const initials = parts.length >= 2
+          ? (parts[0][0] + parts[1][0]).toUpperCase()
+          : u.slice(0, 2).toUpperCase();
+        return { name, initials, email: this.me.email || `${u}@acme.test` };
       }
-      return { sales: { name: "Priya Nair", initials: "PN", email: "sales@acme.test" },
-               support: { name: "Marcus Webb", initials: "MW", email: "support@acme.test" },
-               admin: { name: "Dana Okafor", initials: "DO", email: "admin@acme.test" }
+      return { sales: { name: "Priya Nair", initials: "PN", email: "priya.nair@acme.test" },
+               support: { name: "Marcus Webb", initials: "MW", email: "marcus.webb@acme.test" },
+               admin: { name: "Dana Okafor", initials: "DO", email: "dana.okafor@acme.test" }
              }[this.role];
     },
 
@@ -462,17 +479,35 @@ window.vantage = function () {
         const r = await fetch("/sessions", { credentials: "include" });
         if (!r.ok) throw new Error(`sessions ${r.status}`);
         const data = await r.json();
-        // Map server shape {id, title, last_updated} → UI shape used by the sidebar.
-        this.chats = (data.sessions || []).map((s) => ({
-          id: s.id,
-          title: s.title,
-          time: relativeTime(s.last_updated),
-          group: bucketTime(s.last_updated),
-          messages: [],   // loaded lazily when the chat is opened
-          loaded: false,
-        }));
+        // MERGE, do not replace — wholesale-replacing this.chats wipes in-memory messages
+        // for any chat that just finished streaming, and the answer appears to "vanish"
+        // until the user switches chats and triggers a refetch. We keep existing objects
+        // by id (preserving their .messages + .loaded), add any new ids from the server,
+        // and drop any ids the server no longer knows about.
+        const byId = new Map(this.chats.map((c) => [c.id, c]));
+        const merged = (data.sessions || []).map((s) => {
+          const existing = byId.get(s.id);
+          if (existing) {
+            existing.title = s.title;
+            existing.time = relativeTime(s.last_updated);
+            existing.group = bucketTime(s.last_updated);
+            return existing;
+          }
+          return {
+            id: s.id,
+            title: s.title,
+            time: relativeTime(s.last_updated),
+            group: bucketTime(s.last_updated),
+            messages: [],
+            loaded: false,
+          };
+        });
+        // Preserve any locally-created chat that hasn't been persisted yet (isNew=true).
+        const pendingNew = this.chats.filter((c) => c.isNew && !byId.has(c.id));
+        this.chats = [...pendingNew, ...merged];
       } catch (e) {
-        this.chats = [];
+        // On error, leave the existing chat list intact — don't punish the user for a
+        // transient /sessions failure by blanking their sidebar.
       }
     },
 
@@ -488,7 +523,7 @@ window.vantage = function () {
           id: MID++, role: m.role,
           text: m.role === "user" ? m.content : "",
           md:   m.role === "assistant" ? m.content : "",
-          trace: [], elapsedMs: 0,
+          trace: [], timeline: [], elapsedMs: 0,
         }));
         chat.loaded = true;
         this.$nextTick(() => this.scrollToEnd());
@@ -517,12 +552,26 @@ window.vantage = function () {
     toggleTheme() { this.setTheme(this.theme === "dark" ? "light" : "dark"); },
 
     // role helpers
+    // role-label → persona username. Used by setRole to redirect through /auth/switch
+    // so 'switching roles' is a real identity swap (new JWT, new realm roles) rather
+    // than a cosmetic flip of this.role. See app/main.py:auth_switch.
+    rolePersona: { sales: "priya.nair", support: "marcus.webb", admin: "dana.okafor" },
     setRole(r) {
-      this.role = r;
-      this.flash(`Role switched to ${this.roleLabel(r)} — try a write to see RBAC live.`);
+      if (r === this.role) { this.flash("Already signed in as " + this.roleLabel(r)); return; }
+      const persona = this.rolePersona[r];
+      if (!persona) return;
+      // Hard navigation — clears the BFF session, redirects to Keycloak with login_hint
+      // pre-filled to the chosen persona. User types that persona's password, comes back
+      // with a fresh JWT carrying the new realm roles.
+      window.location.href = `/auth/switch?username=${encodeURIComponent(persona)}`;
     },
     roleLabel(r) { return { sales: "sales", support: "support", admin: "admin" }[r]; },
-    roleSubLabel(r) { return { sales: "read-only", support: "read + update issues", admin: "full access" }[r]; },
+    roleSubLabel(r) {
+      // Show the persona username (the thing you'll be typing the password for) plus a
+      // one-line capability hint — makes the role-switcher honest about what it does.
+      const desc = { sales: "read-only", support: "read + update issues", admin: "full access" }[r];
+      return `${this.rolePersona[r]} · ${desc}`;
+    },
     roleBadgeClass(r) {
       if (r === "admin")   return "border-accentedge text-accent bg-accentsoft";
       if (r === "support") return "border-[oklch(0.66_0.14_220_/_0.4)] text-[oklch(0.78_0.12_220)] bg-[oklch(0.74_0.12_220_/_0.10)]";
@@ -595,11 +644,21 @@ window.vantage = function () {
       // arrive; tool_start/end events drive the trace expander and the inline "calling…"
       // indicator. The session_id arrives in the very first event so we can adopt it for
       // a new chat before any content lands.
-      const ass = {
-        id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
+      const assRaw = {
+        id: MID++, role: "assistant", md: "", trace: [], timeline: [], elapsedMs: 0,
         streaming: true, currentTool: null, errored: null,
+        // _currentText buffers the model's interim text since the last tool call so we
+        // can commit it as a reasoning block when the next tool_start fires (see
+        // _handleStreamEvent). Underscored to discourage template binding.
+        _currentText: "",
       };
-      chat.messages.push(ass);
+      // CRITICAL: after push, re-bind to the array element — that's Alpine's reactive
+      // proxy. Mutating the local `assRaw` (the pre-push reference) bypasses Alpine's
+      // tracking and the DOM never re-renders — the "have to switch chats to see the
+      // response" bug. Same pattern in runSkill below.
+      chat.messages.push(assRaw);
+      const ass = chat.messages[chat.messages.length - 1];
+
       this.isStreaming = true;
       this.cancelRequested = false;
       ass.currentTool = { tool: "thinking", argPreview: "" };
@@ -684,20 +743,39 @@ window.vantage = function () {
           }
           break;
         case "text":
+          // Stream into the answer area AND a parallel buffer. If a tool_start fires
+          // next, the buffer becomes a "reasoning" block in the timeline and the matching
+          // tail of ass.md is retracted — only the *final* iteration's text stays as the
+          // answer. If no tool_start fires (single-iteration query), the buffer is just
+          // residual and ass.md is the answer as-streamed.
           if (ass.currentTool && ass.currentTool.tool === "thinking") ass.currentTool = null;
-          ass.md += data.delta || "";
+          const delta = data.delta || "";
+          ass.md += delta;
+          ass._currentText = (ass._currentText || "") + delta;
           ass.elapsedMs = Math.round(performance.now() - start);
           if (ass.md.length % 60 < 4) this.$nextTick(() => this.scrollToEnd());
           break;
         case "tool_start":
+          // Commit any accumulated reasoning text as a timeline thought BEFORE this tool
+          // (only on the iteration's first tool_start — by tool_end buffer is empty).
+          if (ass._currentText) {
+            ass.timeline.push({ kind: "thought", text: ass._currentText });
+            ass.md = ass.md.slice(0, Math.max(0, ass.md.length - ass._currentText.length));
+            ass._currentText = "";
+          }
           ass.currentTool = {
             tool: data.tool,
             argPreview: previewArgs(data.input || {}),
           };
-          // Push a placeholder trace entry; tool_end will fill in status + ms.
+          // Push a placeholder trace entry; tool_end will fill in status + ms. Also push
+          // a matching timeline entry so thoughts + tools render in the order they happened.
+          const argPreview = previewArgs(data.input || {});
           ass.trace.push({
-            tool: data.tool,
-            argPreview: previewArgs(data.input || {}),
+            tool: data.tool, argPreview,
+            status: "running", ms: 0,
+          });
+          ass.timeline.push({
+            kind: "tool", tool: data.tool, argPreview,
             status: "running", ms: 0,
           });
           break;
@@ -711,11 +789,21 @@ window.vantage = function () {
               break;
             }
           }
+          // Same for the timeline entry (kept in sync so the rendered order matches reality).
+          for (let i = ass.timeline.length - 1; i >= 0; i--) {
+            if (ass.timeline[i].kind === "tool" && ass.timeline[i].tool === data.tool
+                && ass.timeline[i].status === "running") {
+              ass.timeline[i].status = data.status;
+              ass.timeline[i].ms = data.ms;
+              break;
+            }
+          }
           ass.elapsedMs = Math.round(performance.now() - start);
           break;
         case "done":
           ass.elapsedMs = data.elapsed_ms || ass.elapsedMs;
           ass.currentTool = null;
+          ass._currentText = "";  // final iteration text stays in ass.md
           break;
         case "error":
           ass.errored = data.detail || "Stream error.";
@@ -782,12 +870,14 @@ window.vantage = function () {
       if (!chat.title) chat.title = `Skill — ${s.name}`;
       this.$nextTick(() => this.scrollToEnd());
 
-      const ass = {
-        id: MID++, role: "assistant", md: "", trace: [], elapsedMs: 0,
+      const assRaw = {
+        id: MID++, role: "assistant", md: "", trace: [], timeline: [], elapsedMs: 0,
         streaming: true, currentTool: { tool: `skill:${s.name}`, argPreview: paramStr },
-        errored: null,
+        errored: null, _currentText: "",
       };
-      chat.messages.push(ass);
+      // Re-bind to the reactive proxy after push — same Alpine reactivity gotcha as runAgent.
+      chat.messages.push(assRaw);
+      const ass = chat.messages[chat.messages.length - 1];
       this.isStreaming = true;
 
       try {
