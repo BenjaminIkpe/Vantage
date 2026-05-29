@@ -1,4 +1,4 @@
-"""Vantage MCP server — the five named tools exposed over MCP (Streamable HTTP).
+"""Vantage MCP server — the nine named tools exposed over MCP (Streamable HTTP).
 
 Why MCP (ADR-003): the agent *discovers and calls named tools*, never raw SQL. This
 server owns the database (only it holds DATABASE_URL) and re-verifies the caller's
@@ -11,8 +11,8 @@ KeycloakVerifier (same JWKS/issuer as the API) → a verified VantageToken carri
 realm roles → each tool reads it via get_access_token() and checks the role before
 touching Postgres. A missing/invalid token is rejected with 401 by the transport.
 
-Currently exposes the three read tools; the write tools land in a later slice and will
-appear to the agent automatically via MCP discovery.
+Exposes nine tools — three reads, three browse/list (paginated), and three RBAC-checked
+writes — each discovered and called by the agent via MCP discovery.
 """
 import logging
 import os

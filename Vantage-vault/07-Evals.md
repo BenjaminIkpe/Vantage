@@ -2,7 +2,7 @@
 title: Evals
 type: evals
 status: active
-updated: 2026-05-27
+updated: 2026-05-29
 ---
 
 # Evals
@@ -39,8 +39,11 @@ Uses the dev ROPC grant for the three persona logins (`priya.nair` / `priya` for
 | 8 | "open issues for Velocity" → "summarise **the second one**" | support | (turn 2) `summarise_issue_history` | reference resolved from **Redis** session (X1) | ✅ |
 | 9 | Skill `escalation-summary {customer: Velocity}` | sales | `get_open_issues` (+history) | risk level + advice; read-only Skill (S2) | ✅ |
 | 10 | `POST /ask` with **no token** | — | — | **HTTP 401** (auth required, T1) | ✅ |
+| 11 | "Who are our customers? Show me a few." | sales | `list_customers`→`ok` | **browse**: grounded customer list (PR #21) | ✅ |
+| 12 | "All critical open issues across customers" | support | `list_issues`→`ok` | **browse**: cross-customer triage by filter | ✅ |
+| 13 | "What next actions are overdue?" | admin | `list_next_actions`→`ok` | **browse**: admin oversight of overdue directives | ✅ |
 
-**Latest run: 10 / 10 passed** (Codespace, against the committed seed).
+**Latest run: 13 / 13 passed** (Codespace, against the committed seed).
 
 > [!TIP] Includes the negative case
 > Case 6 (a `sales_user` trying to update an issue) is the brief's required **denied** case — it proves the *tool* enforces RBAC on the re-verified role, not the prompt: the agent attempts the tool and relays the refusal.

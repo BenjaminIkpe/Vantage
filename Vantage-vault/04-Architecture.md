@@ -2,7 +2,7 @@
 title: Architecture
 type: architecture
 status: locked
-updated: 2026-05-27
+updated: 2026-05-29
 ---
 
 # Architecture
@@ -13,7 +13,7 @@ updated: 2026-05-27
 ## Decisions locked
 - **[ADR-001](05-Decisions/ADR-001-agent-framework.md)** — agent = simple tool-calling loop (not LangGraph); model-agnostic; built for a contained LangGraph migration.
 - **[ADR-002](05-Decisions/ADR-002-rbac-tool-boundary.md)** — RBAC enforced server-side in each tool (never in the prompt); Keycloak is the source of truth for roles.
-- **[ADR-003](05-Decisions/ADR-003-mcp-server.md)** — custom MCP server exposing the 5 named tools; HTTP transport (stdio fallback).
+- **[ADR-003](05-Decisions/ADR-003-mcp-server.md)** — custom MCP server exposing the named tools; HTTP transport (stdio fallback).
 - **[ADR-004](05-Decisions/ADR-004-environment.md)** — *(superseded)* Azure VM was the original plan; SKU-locked.
 - **[ADR-005](05-Decisions/ADR-005-seed-data.md)** — committed static seed, generated hybrid (Faker + Claude), shaped to the evals.
 - **[ADR-006](05-Decisions/ADR-006-memory-split.md)** — Redis for session/working memory; PostgreSQL as the system of record.
@@ -22,7 +22,7 @@ updated: 2026-05-27
 ## Component map (Docker Compose services)
 - **App / API** — entry point (FastAPI assumed); validates the Keycloak token, runs the agent loop.
 - **Agent loop** — gives Claude (via a thin, swappable model adapter) the tool list; executes chosen tools; returns the answer.
-- **MCP server** — exposes the 5 named tools over HTTP; each tool checks role, then queries Postgres.
+- **MCP server** — exposes the nine named tools over HTTP; each tool checks role, then queries Postgres.
 - **PostgreSQL** — durable store.
 - **Redis** — multi-turn session memory.
 - **Keycloak** — authentication + role issuance.
@@ -32,8 +32,8 @@ updated: 2026-05-27
 ## The agent
 Minimal single-agent tool-calling loop (ADR-001): question → Claude selects tool(s) → tool runs (RBAC-checked) → result → repeat → answer. The model call sits behind a thin adapter for provider-agnosticism.
 
-## Tools (the five)
-`get_customer_profile` · `get_open_issues` · `summarise_issue_history` · `update_issue` · `create`/`update_next_action`. Standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
+## Tools (the nine)
+**Reads** (any authenticated role): `get_customer_profile` · `get_open_issues` · `summarise_issue_history`. **Writes** (RBAC-checked): `update_issue` (support+admin) · `create_next_action` · `update_next_action` (admin). **Browse** (read, any role; paginated + filterable, added in PR #21): `list_customers` · `list_issues` · `list_next_actions`. Standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
 
 ## Skills (reusable, named capabilities)
 A **Skill** is a packaged, reusable capability — the Anthropic Agent-Skill pattern, embodied here as a small JSON file: `{name, description, instructions, parameters[], allowed_tools[]}`. Running a Skill *reuses the agent loop*: the skill's instructions become the system prompt and `allowed_tools` restricts the toolset — **least privilege on top of** the per-tool RBAC. A Skill is *just a prompt + a tool whitelist*, so even a user-authored skill can never exceed the caller's permissions (the dividend of keeping RBAC in the tools, not the prompt).
@@ -79,7 +79,7 @@ flowchart TD
         API["API · FastAPI<br/>validates token, runs agent loop"]
         KC["Keycloak<br/>authentication + roles"]
         Loop["Agent loop<br/>Claude (model adapter)"]
-        MCP["MCP server · HTTP<br/>5 named tools · RBAC per tool"]
+        MCP["MCP server · HTTP<br/>9 named tools · RBAC per tool"]
         Redis[("Redis<br/>session memory · TTL")]
         PG[("PostgreSQL<br/>system of record")]
     end
