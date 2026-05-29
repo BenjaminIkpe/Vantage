@@ -182,15 +182,18 @@ class TestStreaming:
         assert len(text) > 100 and "velocity" in text
 
     def test_trace_expander_visible_after_stream(self, page_support: Page):
-        send_message(page_support, "Open issues for Velocity Marketplace?")
-        wait_for_streaming_done(page_support, timeout=90)
+        # The canonical multi-tool hero query — needs get_customer_profile + get_open_issues
+        # + summarise_issue_history. Reliably triggers tools (the short variant occasionally
+        # gets answered without tool use, which is a real model-variance failure mode).
+        send_message(page_support, "Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action.")
+        wait_for_streaming_done(page_support, timeout=120)
         # After streaming, the expander button shows 'show thinking' (collapsed) or 'hide'
         # (still expanded by user). Either label is fine — just confirm the expander rendered.
         page_support.wait_for_selector("text=/show thinking|^hide$/", timeout=5_000)
 
     def test_elapsed_ms_displayed(self, page_support: Page):
-        send_message(page_support, "Open issues for Velocity Marketplace?")
-        wait_for_streaming_done(page_support, timeout=60)
+        send_message(page_support, "Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action.")
+        wait_for_streaming_done(page_support, timeout=120)
         # Look for a "·" followed by a duration
         body = page_support.inner_text("body")
         # something like "2 tools · 4.8s" or "· 4810ms"
