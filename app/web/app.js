@@ -4,6 +4,15 @@
 
 const md = window.markdownit({ html: false, linkify: true, breaks: false, typographer: true });
 
+// Wrap fenced code blocks with a copy button. DOMPurify keeps the button (it strips only
+// event handlers), so a delegated click listener (below) does the actual copy.
+const _origFence = md.renderer.rules.fence;
+md.renderer.rules.fence = function (tokens, idx, options, env, self) {
+  const out = _origFence ? _origFence(tokens, idx, options, env, self)
+                         : self.renderToken(tokens, idx, options);
+  return `<div class="code-wrap">${out}<button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>`;
+};
+
 // Defensively strip pictographic emojis from agent output — the system prompt forbids them,
 // but a belt-and-braces strip keeps the UI consistent regardless of model variance.
 // Range covers: misc symbols + dingbats, emoticons, transport & map symbols, supplemental
@@ -15,6 +24,22 @@ function renderMd(text) {
   const cleaned = text.replace(EMOJI_RE, "");
   return window.DOMPurify.sanitize(md.render(cleaned));
 }
+
+// Copy-code: one delegated listener for the buttons injected into rendered code blocks
+// (the markup comes from x-html, so per-button handlers aren't an option — delegate instead).
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".copy-code");
+  if (!btn) return;
+  const wrap = btn.closest(".code-wrap");
+  const codeEl = wrap && (wrap.querySelector("code") || wrap.querySelector("pre"));
+  const code = codeEl ? codeEl.textContent : "";
+  if (!code || !navigator.clipboard) return;
+  navigator.clipboard.writeText(code).then(() => {
+    const prev = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = prev; }, 1200);
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
