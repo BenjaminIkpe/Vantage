@@ -308,6 +308,20 @@ window.vantage = function () {
       return "bg-surface text-textmuted";
     },
 
+    _sourceSummary(result) {
+      // A short grounding summary for a tool result, shown in the Sources footer (e.g.
+      // "4 open"). Falls back to "" — the status pill alone is enough grounding.
+      if (!result || typeof result !== "object") return "";
+      if (typeof result.open_count === "number") return `${result.open_count} open`;
+      if (typeof result.total_count === "number") return `${result.total_count} total`;
+      for (const [k, label] of [["open_issues", "open"], ["issues", "issues"],
+                                ["customers", "customers"], ["next_actions", "next actions"],
+                                ["candidates", "matches"], ["updates", "updates"]]) {
+        if (Array.isArray(result[k])) return `${result[k].length} ${label}`;
+      }
+      return "";
+    },
+
     formatChip(s) {
       // turn `text` into a code-styled span
       return s.replace(/`([^`]+)`/g, '<code class="mono text-[12px] px-1.5 py-0.5 rounded bg-bg border border-linesoft text-[oklch(0.85_0.06_45)]">$1</code>');
@@ -530,6 +544,13 @@ window.vantage = function () {
           ass.elapsedMs = data.elapsed_ms || ass.elapsedMs;
           ass.currentTool = null;
           ass._currentText = "";  // final iteration text stays in ass.md
+          // Enrich the trace with each tool's result so the Sources footer can cite the
+          // grounding data (the live trace only carried status + ms; `done` carries results).
+          if (Array.isArray(data.trace)) {
+            data.trace.forEach((t, i) => {
+              if (ass.trace[i]) ass.trace[i].sourceSummary = this._sourceSummary(t.result);
+            });
+          }
           break;
         case "error":
           ass.errored = data.detail || "Stream error.";
