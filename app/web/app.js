@@ -462,6 +462,13 @@ window.vantage = function () {
           chat.time = "just now";
           chat.group = "Today";
         }
+
+        // After a clean answer: suggest follow-ups, and (new chat only) generate a title.
+        // Fire-and-forget — non-blocking niceties; failures degrade silently.
+        if (ass.md && !ass.errored && !this.cancelRequested) {
+          this._loadFollowups(ass, text);
+          if (startedNewChat) this._generateTitle(chat, text, ass.md);
+        }
       } catch (e) {
         // AbortError = the user hit Stop; that's intentional, not a failure to surface.
         if (e.name !== "AbortError" && !this.cancelRequested) {
@@ -563,6 +570,43 @@ window.vantage = function () {
       ass.currentTool = null;
       this.isStreaming = false;
       this.$nextTick(() => this.scrollToEnd());
+    },
+
+    sendSuggestion(text) {
+      // Click a follow-up chip → send it as the next query.
+      this.input = text;
+      this.send();
+    },
+
+    async _loadFollowups(ass, query) {
+      // Up to 3 role-aware follow-up suggestions for this exchange (backend /followups).
+      // Fire-and-forget: any failure leaves ass.followups unset and the chip row hidden.
+      try {
+        const r = await fetch("/followups", {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, answer: ass.md || "" }),
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        ass.followups = Array.isArray(data.suggestions) ? data.suggestions : [];
+      } catch (e) { /* niceties only — stay silent */ }
+    },
+
+    async _generateTitle(chat, query, answer) {
+      // Replace the placeholder (first-message) title with an LLM one, async. The backend
+      // persists it, so the sidebar and a reload both reflect it.
+      if (!chat || !chat.id || chat.isNew) return;
+      try {
+        const r = await fetch(`/sessions/${encodeURIComponent(chat.id)}/title`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, answer }),
+        });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.title) chat.title = data.title;
+      } catch (e) { /* keep the client-side title */ }
     },
 
     cancel() {

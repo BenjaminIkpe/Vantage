@@ -407,6 +407,18 @@
                       </div>
                     </template>
 
+                    <!-- Follow-up suggestions (LLM, role-aware) — only under the latest answer -->
+                    <template x-if="!msg.streaming && msg.followups && msg.followups.length && idx === messages.length - 1">
+                      <div class="mt-2.5 flex flex-wrap gap-1.5">
+                        <template x-for="(f, fi) in msg.followups" :key="fi">
+                          <button @click="sendSuggestion(f)"
+                                  class="px-2.5 py-1 rounded-full border border-linesoft bg-surface text-[12px] text-textsoft hover:text-text hover:border-line text-left transition-colors">
+                            <span x-text="f"></span>
+                          </button>
+                        </template>
+                      </div>
+                    </template>
+
                     <!-- Tool indicator (only while streaming, between tool calls) -->
                     <template x-if="msg.currentTool">
                       <div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-linesoft rounded-lg mono text-[11.5px] text-textsoft">
