@@ -14,7 +14,7 @@ import oidc
 from auth import Authed, Principal, authed, verify_token
 import json as _json
 
-from agent import run_agent, run_agent_streaming
+from agent import generate_title, run_agent, run_agent_streaming, suggest_followups
 from security import verify_access_token
 from session import (
     consume_oauth_state,
@@ -27,6 +27,7 @@ from session import (
     record_user_session,
     resolve_session_id,
     save_turn,
+    set_session_title,
     store_auth_session,
     store_oauth_state,
     user_owns_session,
@@ -296,6 +297,27 @@ async def ask_stream(req: AskRequest, caller: Authed = Depends(authed)):
                              headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
+# --- Assistive endpoints (suggested follow-ups) -----------------------------------------
+
+
+class FollowupsRequest(BaseModel):
+    query: str
+    answer: str
+
+
+@app.post("/followups")
+async def followups(req: FollowupsRequest, caller: Authed = Depends(authed)):
+    """Up to 3 short, ready-to-send next queries for the exchange the user just saw, tailored to
+    the caller's role (never an action the role can't perform). Returns {"suggestions": []} on
+    any failure — never 500 — so the UI degrades silently."""
+    try:
+        suggestions = await suggest_followups(req.query, req.answer, caller.principal)
+    except Exception:
+        logger.exception("followups generation failed")
+        suggestions = []
+    return {"suggestions": suggestions}
+
+
 # --- Per-user session history (chat-history sidebar) ------------------------------------
 
 
@@ -325,6 +347,23 @@ def delete_session(session_id: str, caller: Authed = Depends(authed)):
     if not delete_user_session(caller.principal.username, session_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"status": "deleted", "session_id": session_id}
+
+
+class TitleRequest(BaseModel):
+    query: str
+    answer: str
+
+
+@app.post("/sessions/{session_id}/title")
+async def set_title(session_id: str, req: TitleRequest, caller: Authed = Depends(authed)):
+    """Generate and persist a concise (<= 6 word) title from the session's first exchange. 404 if
+    the caller doesn't own the session. On LLM failure, falls back to the truncated first query.
+    The title is stored on the session record (Redis), so GET /sessions reflects it immediately."""
+    if not user_owns_session(caller.principal.username, session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    title = await generate_title(req.query, req.answer)  # never raises; returns a fallback
+    set_session_title(session_id, title)
+    return {"title": title}
 
 
 @app.get("/skills")
