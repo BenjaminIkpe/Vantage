@@ -15,6 +15,7 @@ the assistant turn; tool results are appended as `role: "tool"` messages keyed b
 """
 import json
 import os
+import re
 import time
 
 from mcp import ClientSession
@@ -263,3 +264,106 @@ async def run_agent_streaming(query: str, token: str, principal: Principal,
                 return
 
     yield {"type": "done", "trace": trace, "elapsed_ms": _elapsed_ms(), "stopped": True}
+
+
+# --- Lightweight assistive completions (no tools) ---------------------------------------
+# Small one-shot LLM calls that power the UI's assistive touches (suggested follow-ups, chat
+# titles). They reuse the same model adapter (app/llm.py) as the agent loop but skip the MCP
+# tool loop — they neither read nor write business data, so they need no tools and no RBAC.
+
+_NO_EMOJI = "Write plain text only — no emojis or pictographic symbols (no 🔴 🟢 ✅ ❌ 📋 ⚠️ etc.)."
+
+# What each role may actually DO (mirrors the role x tool matrix in 02-User-Stories.md,
+# enforced in mcp_server/tools.py). Used to keep follow-up suggestions within the caller's
+# permissions — never suggest a write the role cannot perform. Reads are open to all roles.
+_ROLE_CAPABILITIES = {
+    "sales_user": "read-only: look up customers, browse/list issues and next actions, read an "
+                  "issue's history. NO writes.",
+    "support_user": "all reads, plus update an issue (add a note and/or change its status). "
+                    "Cannot create or change next actions.",
+    "admin": "all reads and issue updates, plus create and update next actions.",
+}
+
+
+async def complete(system: str, user: str, max_tokens: int = 256) -> str:
+    """One no-tools LLM completion via the shared adapter (app/llm.py). Returns the text, or
+    raises — callers decide their own fallback."""
+    resp = await aclient().chat.completions.create(
+        model=MODEL,
+        max_tokens=max_tokens,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": user}],
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
+def _capabilities_for(principal: Principal) -> str:
+    for role in ("admin", "support_user", "sales_user"):  # most-privileged first
+        if role in principal.roles:
+            return _ROLE_CAPABILITIES[role]
+    return _ROLE_CAPABILITIES["sales_user"]  # safe default: reads only
+
+
+def _parse_suggestions(raw: str) -> list[str]:
+    """Parse the model's reply into 0-3 clean suggestion strings — tolerant of a JSON array,
+    a ```json fence, or a bulleted/numbered list."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", text).strip()
+    items: list[str] = []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            items = [str(x) for x in parsed]
+    except Exception:
+        items = [re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", ln).strip() for ln in text.splitlines()]
+    out: list[str] = []
+    for s in items:
+        s = s.strip().strip('"').strip()
+        if s:
+            out.append(s[:80])
+        if len(out) == 3:
+            break
+    return out
+
+
+async def suggest_followups(query: str, answer: str, principal: Principal) -> list[str]:
+    """Up to 3 short, ready-to-send next queries for the exchange the user just saw, kept within
+    the caller's role permissions. Returns [] on any failure (the caller then surfaces nothing)."""
+    if not (query and query.strip()):
+        return []
+    system = (
+        "You are Vantage, an internal assistant for Acme Operations staff (a B2B payments "
+        "platform). Given the exchange the user just saw, propose up to 3 natural follow-up "
+        "questions they are likely to ask next. " + _NO_EMOJI + " Each suggestion must be a "
+        "complete, ready-to-send query (the user clicks to send it verbatim), at most ~60 "
+        "characters, with no leading numbers, bullets, or quotes. Stay strictly within what "
+        f"THIS user's role allows: {_capabilities_for(principal)} Never suggest an action the "
+        'role cannot perform. Return ONLY a JSON array of strings, e.g. ["...", "..."]. '
+        "Return [] if nothing useful follows."
+    )
+    try:
+        raw = await complete(system, f"User asked:\n{query}\n\nAssistant answered:\n{answer}", 200)
+    except Exception:
+        return []
+    return _parse_suggestions(raw)
+
+
+async def generate_title(query: str, answer: str) -> str:
+    """A concise (<= 6 word) chat title for a session's first exchange. Falls back to the
+    truncated first query on any failure — never raises."""
+    fallback = (query or "").strip()[:60] or "New chat"
+    if not (query and query.strip()):
+        return fallback
+    system = (
+        "Generate a short title for a chat in Vantage (an internal assistant for Acme "
+        "Operations staff). Summarise what the conversation is about in at most 6 words. "
+        + _NO_EMOJI + " No surrounding quotes, no trailing punctuation, no leading label — "
+        "reply with the title text only."
+    )
+    try:
+        raw = await complete(system, f"User asked:\n{query}\n\nAssistant answered:\n{answer}", 24)
+    except Exception:
+        return fallback
+    title = " ".join(raw.strip().strip('"').strip().split()[:6]).strip(" .")
+    return title or fallback

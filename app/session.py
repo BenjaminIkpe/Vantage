@@ -167,6 +167,19 @@ def record_user_session(username: str, session_id: str, first_user_text: str | N
         pass
 
 
+def set_session_title(session_id: str, title: str) -> None:
+    """Overwrite the stored title for a session (the LLM-generated title from the title
+    endpoint). Persists to the same `session:{id}:title` key that `user_sessions` reads, so
+    GET /sessions reflects it immediately and it survives reload. Best-effort — a Redis outage
+    must never fail the request."""
+    if not session_id or not title or not title.strip():
+        return
+    try:
+        _redis().set(f"session:{session_id}:title", title.strip()[:TITLE_MAX], ex=TTL_SECONDS)
+    except Exception:
+        pass
+
+
 def user_sessions(username: str) -> list[dict]:
     """List the user's sessions newest-first as `[{id, title, last_updated}]`."""
     if not username:
