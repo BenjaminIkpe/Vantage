@@ -1,6 +1,6 @@
-// prototype-app.js — Alpine state + mocked agent for Vantage.
-// No backend; all responses are scripted to mirror the real seed data
-// (db/seed.sql) and RBAC matrix (Vantage-vault/02-User-Stories.md).
+// app.js — Alpine state for the Vantage chat UI.
+// Talks to the real backend end-to-end: OIDC/BFF auth, SSE streaming via
+// /ask/stream, /sessions history, and /skills/*. No mocked responses.
 
 const md = window.markdownit({ html: false, linkify: true, breaks: false, typographer: true });
 
@@ -19,7 +19,6 @@ function renderMd(text) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let MID = 1; // monotonic message id
 
 function uid(prefix = "id") { return `${prefix}-${Math.random().toString(36).slice(2, 9)}`; }
@@ -28,9 +27,6 @@ function previewArgs(args) {
     .map(([k, v]) => `${k}: ${typeof v === "string" ? JSON.stringify(v) : v}`)
     .join(", ");
 }
-
-const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const SLOW = reducedMotion ? 0.05 : 1; // multiplier; near-zero when reduced motion is on
 
 function relativeTime(unixTs) {
   const diff = Math.floor(Date.now() / 1000) - unixTs;
@@ -47,283 +43,6 @@ function bucketTime(unixTs) {
   if (diff < 86400 * 2) return "Yesterday";
   if (diff < 86400 * 7) return "Last 7 days";
   return "Earlier";
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Roles & RBAC (matches Vantage-vault/02-User-Stories.md role × tool matrix)
-// ─────────────────────────────────────────────────────────────────────────────
-const ROLE_TOOLS = {
-  sales:   new Set(["get_customer_profile", "get_open_issues", "summarise_issue_history"]),
-  support: new Set(["get_customer_profile", "get_open_issues", "summarise_issue_history", "update_issue"]),
-  admin:   new Set(["get_customer_profile", "get_open_issues", "summarise_issue_history", "update_issue", "create_next_action", "update_next_action"]),
-};
-
-function roleAllows(role, tool) { return ROLE_TOOLS[role].has(tool); }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Seed chats (the pre-existing sidebar history)
-// ─────────────────────────────────────────────────────────────────────────────
-function seedChats() {
-  return [
-    { id: "c1", title: "Velocity Marketplace — risk brief before the renewal call", time: "2m ago", group: "Today", messages: heroConversation() },
-    { id: "c2", title: "Set 5-day deadline on the UBO escalation, assign Marcus",    time: "11m ago", group: "Today", messages: [] },
-    { id: "c3", title: "Pinebrook Retail — what's blocking PB-5240?",                time: "3h ago",  group: "Today", messages: [] },
-    { id: "c4", title: "Lumen Commerce — which one has the delayed payout?",         time: "Yesterday", group: "Yesterday", messages: lumenConversation() },
-    { id: "c5", title: "Quartz Talent — open access requests across the team",       time: "Yesterday", group: "Yesterday", messages: [] },
-    { id: "c6", title: "Calm Waters Subscriptions — anything open?",                 time: "Mon",      group: "Last 7 days", messages: calmConversation() },
-    { id: "c7", title: "Cross-customer integration issues this week",                time: "Sun",      group: "Last 7 days", messages: [] },
-  ];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pre-rendered conversations for the chats that aren't blank
-// ─────────────────────────────────────────────────────────────────────────────
-function heroConversation() {
-  return [
-    {
-      id: MID++, role: "user",
-      text: "Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action.",
-    },
-    {
-      id: MID++, role: "assistant",
-      md: `**Velocity Marketplace** (\`ACME-76085\`, Enterprise, South East) has **4 open issues**. The most urgent is the **webhook signature mismatch** after their key rotation — go-live is effectively blocked until they finish redeploying the new signing secret across all workers.
-
-### Open issues
-
-| # | Issue | Cat. | Priority | Status | Age |
-|---|---|---|---|---|---|
-| 3 | Webhook delivery failing — signature mismatch after key rotation | integration | **critical** | open | 7d |
-| 1 | KYC review blocking marketplace go-live | onboarding | **critical** | in_progress | 97d |
-| 2 | Repeated payout failures to connected accounts | payments | high | in_progress | 35d |
-| 4 | Dashboard latency during the settlement window | performance | medium | pending | 16d |
-
-### Most urgent — issue #3 · Webhook signature mismatch
-
-After the customer rotated their API signing secret, all webhook deliveries from us are rejected at their endpoint with \`HTTP 401 invalid signature\`. They redeployed one service, but **a second worker still uses the cached old secret** — that's the live blocker. \`payment_succeeded\` events aren't reaching them, so order fulfilment is stalled.
-
-### Recommended next action
-
-Push the customer for a **full rollout of the new signing secret** across every worker, with a 48-hour deadline. Once we observe one clean delivery batch, downgrade the priority.
-
-*advice only — recording a formal next action is admin-only*`,
-      trace: [
-        { tool: "get_customer_profile", argPreview: 'name: "Velocity Marketplace"', status: "found", ms: 64 },
-        { tool: "get_open_issues",      argPreview: "customer_id: 1",                status: "found", ms: 71 },
-        { tool: "summarise_issue_history", argPreview: "issue_id: 3",                status: "found", ms: 142 },
-      ],
-      elapsedMs: 4812,
-    },
-  ];
-}
-
-function lumenConversation() {
-  return [
-    { id: MID++, role: "user", text: "open issues for Lumen Commerce" },
-    {
-      id: MID++, role: "assistant",
-      md: `That name matches **two** customers — I don't want to silently pick one. Could you confirm which?
-
-| # | Name | Account ref | Region | Tier |
-|---|---|---|---|---|
-| 2 | Lumen Commerce | \`ACME-53063\` | North West | premium |
-| 3 | Lumen Commerce Group | \`ACME-32819\` | Scotland | strategic |`,
-      trace: [
-        { tool: "get_customer_profile", argPreview: 'name: "Lumen Commerce"', status: "ambiguous", ms: 38 },
-      ],
-      elapsedMs: 412,
-    },
-    { id: MID++, role: "user", text: "Lumen Commerce Group — the Scottish one with the delayed payout." },
-    {
-      id: MID++, role: "assistant",
-      md: `**Lumen Commerce Group** (\`ACME-32819\`, Scotland, strategic) has 1 open high-priority issue:
-
-- **Issue #9 — Payout delayed beyond schedule.** Held by automated risk review after an unusual volume spike. Cleared 2 days ago; payout re-queued and the customer notified of the new arrival window. Nothing currently blocked — safe to mark resolved on the next confirmation.`,
-      trace: [
-        { tool: "get_customer_profile", argPreview: 'name: "Lumen Commerce Group"', status: "found", ms: 41 },
-        { tool: "get_open_issues",      argPreview: "customer_id: 3",                status: "found", ms: 58 },
-        { tool: "summarise_issue_history", argPreview: "issue_id: 9",                status: "found", ms: 96 },
-      ],
-      elapsedMs: 2104,
-    },
-  ];
-}
-
-function calmConversation() {
-  return [
-    { id: MID++, role: "user", text: "Calm Waters Subscriptions — anything open?" },
-    {
-      id: MID++, role: "assistant",
-      md: `**Calm Waters Subscriptions** (\`ACME-21090\`, SMB, South West) has **no open issues** right now. The three issues on record (proration question, SSO setup, sandbox webhook test) are all resolved or closed.
-
-Nothing to flag ahead of a renewal conversation — risk: **Low**.`,
-      trace: [
-        { tool: "get_customer_profile", argPreview: 'name: "Calm Waters Subscriptions"', status: "found", ms: 52 },
-        { tool: "get_open_issues",      argPreview: "customer_id: 4",                     status: "not_found", ms: 47 },
-      ],
-      elapsedMs: 1208,
-    },
-  ];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Mock agent — routes a user query to a scripted response
-// Returns: { tools: [...{tool, args, argPreview, status, ms, mustAllow}], md, elapsedMs }
-//   mustAllow=true → if RBAC blocks the tool, the scripted call becomes denied.
-// ─────────────────────────────────────────────────────────────────────────────
-function routeQuery(text, role) {
-  const q = text.toLowerCase();
-
-  // E1 not_found
-  if (/zzzz|globex foobar|unknownco|absent customer/i.test(q)) {
-    return {
-      tools: [
-        { tool: "get_customer_profile", args: { name: pickCustomerWord(text) || "Zzzz Holdings Ltd" }, status: "not_found", ms: 58 },
-      ],
-      md: `No matching customer for **"${pickCustomerWord(text) || "Zzzz Holdings Ltd"}"**. I checked by name and got no hit — I won't guess at a close match. If you have an account reference (\`ACME-…\`) I can look it up directly.`,
-      elapsedMs: 720,
-    };
-  }
-
-  // E2 ambiguous (Lumen)
-  if (/lumen(?!\s*commerce\s*group)/i.test(q) && !/group/i.test(q)) {
-    return {
-      tools: [
-        { tool: "get_customer_profile", args: { name: "Lumen Commerce" }, status: "ambiguous", ms: 39 },
-      ],
-      md: `That name matches **two** customers — I don't want to silently pick one. Could you confirm which?
-
-| # | Name | Account ref | Region | Tier |
-|---|---|---|---|---|
-| 2 | Lumen Commerce | \`ACME-53063\` | North West | premium |
-| 3 | Lumen Commerce Group | \`ACME-32819\` | Scotland | strategic |`,
-      elapsedMs: 480,
-    };
-  }
-
-  // E3 / Calm Waters → no open
-  if (/calm waters/i.test(q)) {
-    return {
-      tools: [
-        { tool: "get_customer_profile", args: { name: "Calm Waters Subscriptions" }, status: "found", ms: 51 },
-        { tool: "get_open_issues",      args: { customer_id: 4 },                     status: "not_found", ms: 46 },
-      ],
-      md: `**Calm Waters Subscriptions** has **no open issues**. The three on record are resolved or closed. Risk before a renewal call: **Low**.`,
-      elapsedMs: 1100,
-    };
-  }
-
-  // Velocity / KYC blocker — the headline query
-  if (/velocity|kyc|webhook|signature/i.test(q) && /open|issue|risk|brief|urgent|next|kyc|block/i.test(q)) {
-    return {
-      tools: [
-        { tool: "get_customer_profile", args: { name: "Velocity Marketplace" }, status: "found", ms: 64 },
-        { tool: "get_open_issues",      args: { customer_id: 1 },                status: "found", ms: 71 },
-        { tool: "summarise_issue_history", args: { issue_id: 3 },                status: "found", ms: 142 },
-      ],
-      md: `**Velocity Marketplace** (\`ACME-76085\`, Enterprise, South East) has **4 open issues**. The most urgent is the **webhook signature mismatch** after their key rotation — go-live is effectively blocked until they finish redeploying the new signing secret across all workers.
-
-### Open issues
-
-| # | Issue | Cat. | Priority | Status | Age |
-|---|---|---|---|---|---|
-| 3 | Webhook delivery failing — signature mismatch after key rotation | integration | **critical** | open | 7d |
-| 1 | KYC review blocking marketplace go-live | onboarding | **critical** | in_progress | 97d |
-| 2 | Repeated payout failures to connected accounts | payments | high | in_progress | 35d |
-| 4 | Dashboard latency during the settlement window | performance | medium | pending | 16d |
-
-### Most urgent — issue #3 · Webhook signature mismatch
-
-After the customer rotated their API signing secret, all webhook deliveries are rejected at their endpoint with \`HTTP 401 invalid signature\`. They redeployed one service, but **a second worker still uses the cached old secret** — that's the live blocker.
-
-### Recommended next action
-
-Push the customer for a **full rollout of the new signing secret** across every worker with a 48-hour deadline. Downgrade priority after one clean delivery batch.`,
-      elapsedMs: 4640,
-    };
-  }
-
-  // Write paths
-  // (a) create / record next action → admin-only
-  if (/record|create|set\b|add\b/.test(q) && /next action|deadline|directive/.test(q)) {
-    return {
-      tools: [
-        { tool: "create_next_action",
-          args: { issue_id: 1, due_date: "2026-06-02", assignee: "marcus.webb" },
-          status: roleAllows(role, "create_next_action") ? "created" : "denied",
-          ms: roleAllows(role, "create_next_action") ? 188 : 71,
-          mustAllow: true,
-        },
-      ],
-      md: roleAllows(role, "create_next_action")
-        ? `Recorded. Created next action **NA-118** on issue **#1 — KYC review blocking go-live**, due **2026-06-02** (5 days), assigned to **Marcus Webb**.
-
-\`\`\`json
-{
-  "id": 118,
-  "issue_id": 1,
-  "description": "Chase customer for certified second-UBO ID and the source-of-funds questionnaire; escalate to compliance lead if not received by deadline.",
-  "due_date": "2026-06-02",
-  "assignee": "marcus.webb",
-  "status": "open",
-  "created_by": "${currentUserKey(role)}",
-  "created_at": "2026-05-28T14:21:08Z"
-}
-\`\`\`
-
-It's now visible on the issue for the rest of the team.`
-        : `I couldn't record that — your role (\`${role}_user\`) doesn't permit creating next actions. Only **admin** can record formal next actions. Your draft has been kept here; I can hand it to an admin colleague, or reword it as advice in this chat.`,
-      elapsedMs: roleAllows(role, "create_next_action") ? 1124 : 580,
-    };
-  }
-
-  // (b) add note / update issue → support + admin
-  if (/(add|leave)\s+a?\s*note|update\s+issue|status.*(resolved|in_progress|in progress|closed)|mark.*(resolved|closed|in.progress)/i.test(q)) {
-    return {
-      tools: [
-        { tool: "update_issue",
-          args: { issue_id: 3, note: "asked them to redeploy worker B by Friday" },
-          status: roleAllows(role, "update_issue") ? "updated" : "denied",
-          ms: roleAllows(role, "update_issue") ? 121 : 89,
-          mustAllow: true,
-        },
-      ],
-      md: roleAllows(role, "update_issue")
-        ? `Recorded a note on **issue #3 — Webhook signature mismatch**:
-
-> asked them to redeploy worker B by Friday
-
-Attributable to **${displayUser(role)}**, timestamp \`2026-05-28T14:23:11Z\`. Visible on the next read of the issue.`
-        : `I couldn't add that note — your role (\`${role}_user\`) doesn't permit writes to issues. Updating issue notes requires **support** or **admin**. The text of your note has been kept here; ask a support teammate to record it, or I can draft a paste-ready handoff if helpful.`,
-      elapsedMs: roleAllows(role, "update_issue") ? 920 : 380,
-    };
-  }
-
-  // simulate network error
-  if (/^trigger error|^error\b|^break it|crash/.test(q)) {
-    return { error: "The MCP server returned <code>502 upstream_timeout</code> after 12.4s while running <code>summarise_issue_history</code>. Your message wasn't lost — retry or rephrase." };
-  }
-
-  // generic fallback — show the agent reasoning but with a soft answer
-  return {
-    tools: [
-      { tool: "get_customer_profile", args: { name: pickCustomerWord(text) || "the named customer" }, status: "not_found", ms: 64 },
-    ],
-    md: `I didn't find enough specifics in that question to answer with confidence — could you tell me which customer (or issue id) you mean? You can also pick one of the prompts on the empty-chat screen to see a worked example.`,
-    elapsedMs: 720,
-  };
-}
-
-function pickCustomerWord(text) {
-  // crude: extract a Capitalised Phrase if present
-  const m = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
-  return m ? m[1] : null;
-}
-
-function currentUserKey(role) {
-  return { sales: "priya.nair", support: "marcus.webb", admin: "dana.okafor" }[role];
-}
-function displayUser(role) {
-  return { sales: "Priya Nair", support: "Marcus Webb", admin: "Dana Okafor" }[role];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -667,6 +386,8 @@ window.vantage = function () {
       const start = performance.now();
       const startedNewChat = chat.isNew;
 
+      const ctrl = new AbortController();
+      this._streamCtrl = ctrl;
       try {
         const body = { query: text };
         if (!chat.isNew) body.session_id = chat.id;
@@ -675,6 +396,7 @@ window.vantage = function () {
           method: "POST", credentials: "include",
           headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
           body: JSON.stringify(body),
+          signal: ctrl.signal,
         });
 
         if (r.status === 401) {
@@ -727,8 +449,12 @@ window.vantage = function () {
           chat.group = "Today";
         }
       } catch (e) {
-        ass.errored = `Network error: ${e.message || e}`;
+        // AbortError = the user hit Stop; that's intentional, not a failure to surface.
+        if (e.name !== "AbortError" && !this.cancelRequested) {
+          ass.errored = `Network error: ${e.message || e}`;
+        }
       } finally {
+        this._streamCtrl = null;
         this.finishStreaming(ass);
       }
     },
@@ -820,6 +546,7 @@ window.vantage = function () {
 
     cancel() {
       this.cancelRequested = true;
+      this._streamCtrl?.abort();   // actually halt the in-flight /ask/stream fetch + reader
       this.isStreaming = false;
       // mark last assistant message as stopped
       const last = this.messages[this.messages.length - 1];
@@ -839,6 +566,15 @@ window.vantage = function () {
       if (!prior || prior.role !== "user") return;
       chat.messages.splice(idx, 1);
       this.runAgent(chat, prior.text);
+    },
+
+    copyAnswer(msg) {
+      // Copy the assistant's answer (markdown source) to the clipboard.
+      if (!msg || !msg.md) return;
+      navigator.clipboard?.writeText(msg.md).then(
+        () => this.flash("Copied to clipboard"),
+        () => this.flash("Copy failed"),
+      );
     },
 
     // skills — list, select, run (against the real /skills/* endpoints)

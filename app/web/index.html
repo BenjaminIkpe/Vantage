@@ -375,6 +375,17 @@
                     <!-- Markdown content -->
                     <div class="md" x-html="renderMd(msg.md || '') + (msg.streaming && msg.md ? '<span class=\'caret\'></span>' : '')"></div>
 
+                    <!-- Answer actions (copy) — shown once the answer is complete -->
+                    <template x-if="!msg.streaming && msg.md && !msg.errored">
+                      <div class="mt-1.5">
+                        <button @click="copyAnswer(msg)" title="Copy answer"
+                                class="inline-flex items-center gap-1 text-2xs text-textmuted hover:text-text mono">
+                          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                          Copy
+                        </button>
+                      </div>
+                    </template>
+
                     <!-- Tool indicator (only while streaming, between tool calls) -->
                     <template x-if="msg.currentTool">
                       <div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-linesoft rounded-lg mono text-[11.5px] text-textsoft">
