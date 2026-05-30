@@ -45,7 +45,7 @@ flowchart TD
         API["API · FastAPI<br/>validates token, runs the agent loop,<br/>session memory, Skills"]
         KC["Keycloak<br/>authentication + roles"]
         Loop["Agent loop<br/>Claude · MCP client"]
-        MCP["MCP server · Streamable HTTP<br/>5 named tools · re-verifies token · RBAC per tool"]
+        MCP["MCP server · Streamable HTTP<br/>9 named tools · re-verifies token · RBAC per tool"]
         Redis[("Redis<br/>session memory · TTL")]
         PG[("PostgreSQL<br/>system of record")]
     end
@@ -60,18 +60,22 @@ flowchart TD
 ```
 
 - **Agent** = a minimal Claude **tool-calling loop**, not a framework ([ADR-001](Vantage-vault/05-Decisions/ADR-001-agent-framework.md)); model-agnostic via `app/llm.py`.
-- **MCP server** exposes the five named tools over Streamable HTTP ([ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)); the agent *discovers* and *calls* them — it never sees SQL and never holds DB credentials.
+- **MCP server** exposes the nine named tools over Streamable HTTP ([ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)); the agent *discovers* and *calls* them — it never sees SQL and never holds DB credentials.
 - **RBAC is enforced inside each tool**, on the Keycloak token **re-verified at the MCP boundary** ([ADR-002](Vantage-vault/05-Decisions/ADR-002-rbac-tool-boundary.md)) — never in the prompt.
 - **Postgres** = system of record; **Redis** = ephemeral multi-turn session memory ([ADR-006](Vantage-vault/05-Decisions/ADR-006-memory-split.md)).
 
-## The five tools
+## The nine tools
+Six point-lookup / write tools, plus three browse/list tools added once real usage showed exploration needs (PR #21).
 | Tool | Does | Roles |
 |---|---|---|
 | `get_customer_profile` | resolve a customer by name (found / ambiguous / not_found) | all |
 | `get_open_issues` | a customer's open issues, most-urgent first | all |
-| `summarise_issue_history` | an issue + its full audit trail | all |
+| `summarise_issue_history` | an issue + its full audit trail + any next actions | all |
 | `update_issue` | add a note / change status (attributable) | support, admin |
 | `create_next_action` / `update_next_action` | record/update a formal next action | admin |
+| `list_customers` | browse/filter customers (region, segment, tier, account manager); paginated | all |
+| `list_issues` | browse/filter issues across customers (status, priority, category); paginated | all |
+| `list_next_actions` | browse/filter next actions (overdue, status, customer); paginated | all |
 
 A disallowed call writes nothing, returns a structured `denied`, and is **audit-logged**.
 
@@ -82,7 +86,7 @@ Reusable, named capabilities (the Anthropic *Agent Skill* pattern, packaged here
 
 ## Chat UI
 
-Single-page chat (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify, no build step) served by FastAPI at `/`. Streaming SSE token-by-token via `/ask/stream`; per-message **show thinking** panel interleaves the model's pre-tool reasoning with each tool-call pill + per-tool latency; sidebar of past chats (one per OIDC user, Redis-backed); Skills menu; **save as skill** authoring affordance; dark/light themes; full keyboard support (`⌘N` new chat, `⌘K` skills, Enter to send).
+Single-page chat (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify, no build step) served by FastAPI at `/`. Streaming SSE token-by-token via `/ask/stream`; per-message **show thinking** panel interleaves the model's pre-tool reasoning with each tool-call pill + per-tool latency; sidebar of past chats (one per OIDC user, Redis-backed); Skills menu; **save as skill** authoring affordance; dark/light themes; full keyboard support (`⌘N` new chat, `⌘K` skills, Enter to send). Each completed answer carries a visible **Sources** footer (the tools + data it drew on) and **role-aware follow-up chips**; **Stop** truly aborts an in-flight response (not just hides the spinner); new chats get a concise **LLM-generated title**; answers and code blocks have **copy** buttons.
 
 ## Hit the API directly (without the UI)
 
@@ -104,6 +108,8 @@ The browser flow uses real **OIDC Auth-Code + PKCE + BFF cookie** (the access to
 - `POST /ask` `{query, session_id?}` — non-streaming; returns `{answer, trace, elapsed_ms, session_id}`. Used by the eval harness for deterministic assertions.
 - `POST /ask/stream` `{query, session_id?}` — Server-Sent Events: `session` → `text` (deltas) → `tool_start` → `tool_end` → `done`. The UI surface.
 - `GET /sessions` · `GET /sessions/{id}` · `DELETE /sessions/{id}` — the calling user's chat history.
+- `POST /sessions/{id}/title` `{query, answer}` — generate + persist a concise LLM chat title (sidebar).
+- `POST /followups` `{query, answer}` — up to 3 role-aware follow-up suggestions for the last exchange.
 - `GET /skills` · `POST /skills/{name}/run` `{params}` — list / invoke Skills.
 - `POST /skills/draft-from-session` · `POST /skills` — author a Skill from a session, then save.
 - `GET /auth/login` · `GET /auth/callback` · `GET /auth/logout` · `GET /auth/switch?username=<persona>` · `GET /auth/whoami` — the BFF auth surface.
@@ -113,17 +119,17 @@ The browser flow uses real **OIDC Auth-Code + PKCE + BFF cookie** (the access to
 JWT fully verified (signature/issuer/expiry, `alg` pinned); RBAC at the tool boundary, re-verified by the MCP server; parameterised SQL only (no raw-SQL tool); audit logs record identifiers + actions, never tokens or PII. Threat model + dev→prod hardening: [`09-Security.md`](Vantage-vault/09-Security.md).
 
 ## Observability
-Every `/ask` returns a `trace` of tool calls (input, result status, per-tool `ms`) + total `elapsed_ms`; write attempts emit a server-side **audit log** line (`user / roles / target / decision`); tool/agent errors surface as `502` with detail.
+Every `/ask` returns a `trace` of tool calls (input, result status, per-tool `ms`) + total `elapsed_ms`; write attempts emit a server-side **audit log** line (`user / roles / target / decision`); tool/agent errors surface as a `502` on `/ask` or a streamed `error` event on `/ask/stream`, with a **generic** message — internals are logged server-side, never returned to the client.
 
 ## Evaluation
-10 runnable cases proving tool-selection, grounding (E1/E2/E3), RBAC (allow + deny), multi-turn memory, the Skill, and auth — see [`07-Evals.md`](Vantage-vault/07-Evals.md). Run against the live stack:
+13 runnable cases proving tool-selection, grounding (E1/E2/E3), RBAC (allow + deny), multi-turn memory, the Skill, the browse tools, and auth — see [`07-Evals.md`](Vantage-vault/07-Evals.md). Run against the live stack:
 ```bash
-python eval/run_evals.py        # latest: 10/10 passed
+python eval/run_evals.py        # latest: 13/13 passed
 ```
 
 ## Repo layout
 - `app/` — FastAPI API, agent loop (MCP client), session memory, Skills
-- `mcp_server/` — the MCP server: the five tools, DB access, token re-verification
+- `mcp_server/` — the MCP server: the nine tools, DB access, token re-verification
 - `db/` — `schema.sql` + `seed.sql` (committed; generator in `scripts/`)
 - `keycloak/` — realm config (roles + dev users)
 - `eval/` — evaluation harness
