@@ -17,6 +17,7 @@ import json
 import os
 import re
 import time
+from datetime import date
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -28,10 +29,19 @@ MAX_STEPS = 5
 MCP_URL = os.getenv("MCP_URL", "http://mcp:8001/mcp")
 
 
+def _display_name(username: str) -> str:
+    """`marcus.webb` -> `Marcus Webb`; falls back to the raw username."""
+    parts = [p for p in username.replace("_", ".").split(".") if p]
+    return " ".join(p.capitalize() for p in parts) if parts else username
+
+
 def _system_prompt(principal: Principal) -> str:
     return (
         "You are Vantage, an internal assistant for Acme Operations staff (Acme is a B2B "
-        f"payments platform). The current user's role is: {', '.join(principal.roles) or 'unknown'}. "
+        f"payments platform). Today is {date.today().isoformat()}. You are speaking with "
+        f"{_display_name(principal.username)} (username {principal.username}), whose role is: "
+        f"{', '.join(principal.roles) or 'unknown'}. Use today's date for any relative-time "
+        "reasoning, and you already know who the user is — do not ask for it or look it up. "
         "Answer operational questions using the tools provided. Ground every answer in tool "
         "results — never invent customers or data. **Do not use emojis** anywhere in your "
         "responses (no 🔴 🟢 🟡 📋 ⚠️ ✅ ❌ etc.). Write plain text: 'Critical' not '🔴 Critical', "
