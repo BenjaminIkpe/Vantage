@@ -745,3 +745,109 @@ class TestBrowseTools:
         # Either lists overdue ones or honestly says there are none
         text = last_assistant_text(page_admin).lower()
         assert ("overdue" in text or "next action" in text or "none" in text or "no overdue" in text)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 15) HARNESS UX — Stop, grounding Sources footer, follow-up chips, LLM titles,
+#     copy (answer + code block). Added with PRs #29–#32 and #35.
+# ════════════════════════════════════════════════════════════════════════════
+
+def _last_msg(page: Page, expr: str):
+    """Evaluate `expr` against the active chat's last message, bound as `m`. Returns null on
+    any error (no active chat / no messages yet)."""
+    return page.evaluate(
+        "() => { try { const d = window.Alpine.$data(document.body); "
+        "const c = d.activeChat; const m = c && c.messages[c.messages.length - 1]; "
+        "return m ? (" + expr + ") : null; } catch (e) { return null; } }"
+    )
+
+
+class TestStop:
+    def test_stop_aborts_the_token_stream(self, page_support: Page):
+        """Stop must actually halt the stream, not just hide the spinner — assert no further
+        tokens append after Stop (PR #29: cancel() used to only flip a flag while the SSE
+        reader kept appending; now an AbortController aborts the fetch + reader)."""
+        send_message(page_support, "Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action.")
+        deadline = time.time() + 20
+        while time.time() < deadline and not is_streaming(page_support):
+            time.sleep(0.1)
+        time.sleep(1.2)  # let a little text accumulate
+        if not is_streaming(page_support):
+            pytest.skip("model variance: the answer completed before we could Stop")
+        page_support.locator("button:has-text('Stop')").click()
+        wait_for_streaming_done(page_support, timeout=10)
+        text1 = last_assistant_text(page_support)
+        time.sleep(2.5)  # were the stream still alive, more tokens would have arrived
+        text2 = last_assistant_text(page_support)
+        assert text1 == text2, "tokens kept appending after Stop — the stream was not aborted"
+
+
+class TestSources:
+    def test_sources_footer_cites_the_tools(self, page_support: Page):
+        send_message(page_support, "Give me the customer profile for Velocity Marketplace.")
+        wait_for_streaming_done(page_support, timeout=120)
+        if not _last_msg(page_support, "(m.trace || []).length"):
+            pytest.skip("model variance: answered without tool calls — no sources to cite")
+        # 'Sources' header is visible (the reasoning panel is collapsed by default, so this is
+        # the always-visible grounding footer, not the thinking panel).
+        expect(page_support.get_by_text("Sources", exact=True).last).to_be_visible()
+        # The cited tool name is rendered on-screen by the footer.
+        expect(page_support.get_by_text("get_customer_profile").first).to_be_visible()
+
+
+class TestFollowupsAndTitles:
+    def test_followup_chips_appear_and_send(self, page_support: Page):
+        send_message(page_support, "Give me the customer profile for Velocity Marketplace.")
+        wait_for_streaming_done(page_support, timeout=120)
+        # Follow-ups load async via POST /followups — poll the message for them.
+        deadline = time.time() + 20
+        followups = None
+        while time.time() < deadline:
+            followups = _last_msg(page_support, "m.followups || null")
+            if followups:
+                break
+            time.sleep(0.4)
+        if not followups:
+            pytest.skip("no follow-up suggestions returned (a valid degraded outcome)")
+        before = len(assistant_messages(page_support))
+        page_support.get_by_role("button", name=followups[0]).first.click()
+        wait_for_streaming_done(page_support, timeout=120)
+        assert len(assistant_messages(page_support)) > before, \
+            "clicking a follow-up chip did not start a new turn"
+
+    def test_new_chat_gets_an_llm_title(self, page_support: Page):
+        long_q = "Show me the open issues for Velocity Marketplace and summarise the most urgent one"
+        send_message(page_support, long_q)
+        wait_for_streaming_done(page_support, timeout=120)
+        # The title is generated async (POST /sessions/{id}/title) and replaces the raw
+        # first-message placeholder. Poll until it's concise (the LLM title), not the long query.
+        deadline = time.time() + 20
+        title = None
+        while time.time() < deadline:
+            title = page_support.evaluate(
+                "() => { try { const d = window.Alpine.$data(document.body); "
+                "return d.activeChat ? d.activeChat.title : null; } catch (e) { return null; } }"
+            )
+            if title and len(title.split()) <= 8:
+                break
+            time.sleep(0.4)
+        assert title, "no chat title was set"
+        assert len(title.split()) <= 8, \
+            f"title was not replaced by a concise LLM title (still the raw query?): {title!r}"
+
+
+class TestCopy:
+    def test_copy_answer_button_present(self, page_support: Page):
+        send_message(page_support, "Give me the customer profile for Velocity Marketplace.")
+        wait_for_streaming_done(page_support, timeout=120)
+        expect(page_support.locator("button[title='Copy answer']").last).to_be_visible()
+
+    def test_code_blocks_get_a_copy_affordance(self, page_support: Page):
+        """renderMd wraps fenced code blocks in a .code-wrap with a copy button (PR #35)."""
+        html = page_support.evaluate(
+            "() => (typeof renderMd === 'function') "
+            "? renderMd('```\\nGET /v1/health\\n```') : null"
+        )
+        assert html, "renderMd is not reachable as a page global"
+        assert "code-wrap" in html and "copy-code" in html, \
+            f"code block was not wrapped with a copy affordance: {html[:200]}"
