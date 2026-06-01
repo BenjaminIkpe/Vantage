@@ -863,10 +863,11 @@ class TestBriefing:
     wiring (admin-only entry, the modal, the GET /briefing + POST approve calls)."""
 
     def test_briefing_button_hidden_for_sales(self, page_sales: Page):
-        assert page_sales.locator("button:has-text('Briefing')").count() == 0
+        # Admin-gated via x-show — present in the DOM but display:none, so assert visibility.
+        expect(page_sales.locator("button:has-text('Briefing')")).not_to_be_visible()
 
     def test_briefing_button_hidden_for_support(self, page_support: Page):
-        assert page_support.locator("button:has-text('Briefing')").count() == 0
+        expect(page_support.locator("button:has-text('Briefing')")).not_to_be_visible()
 
     def test_briefing_button_visible_for_admin(self, page_admin: Page):
         expect(page_admin.locator("button:has-text('Briefing')")).to_be_visible(timeout=10_000)
