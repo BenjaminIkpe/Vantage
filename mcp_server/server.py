@@ -11,8 +11,9 @@ KeycloakVerifier (same JWKS/issuer as the API) → a verified VantageToken carri
 realm roles → each tool reads it via get_access_token() and checks the role before
 touching Postgres. A missing/invalid token is rejected with 401 by the transport.
 
-Exposes nine tools — three reads, three browse/list (paginated), and three RBAC-checked
-writes — each discovered and called by the agent via MCP discovery.
+Exposes eleven tools — three reads, three browse/list (paginated), three RBAC-checked
+writes, and two admin-only fleet aggregates (the proactive briefing's reads, ADR-008) —
+each discovered and called by the agent (or the briefing graph) via MCP discovery.
 """
 import logging
 import os
@@ -25,7 +26,9 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from security import Principal, verify_access_token
 from tools import (
     create_next_action,
+    detect_patterns,
     get_customer_profile,
+    get_high_risk_customers,
     get_open_issues,
     list_customers,
     list_issues,
@@ -263,6 +266,46 @@ def _update_next_action(next_action_id: int, status: str | None = None,
     result = update_next_action(next_action_id, principal, status=status,
                                 description=description, due_date=due_date)
     return _audit("update_next_action", principal, f"next_action={next_action_id} status={status!r}", result)
+
+
+# --- proactive briefing aggregates (admin-only reads; access audited, ADR-008) -----------
+# These power GET /briefing's LangGraph run. Admin-only at the same boundary as the writes
+# (the fleet-wide view is privileged oversight); the access is audited like a write so the
+# 'who saw the whole portfolio' question has an answer too (T7).
+
+
+@mcp.tool(
+    name="get_high_risk_customers",
+    description=(
+        "Admin only. Rank the customers most at risk by their OPEN issues — those with at "
+        "least one critical or high open issue — most critical first. Use this to pick which "
+        "accounts a fleet-wide briefing should cover. Returns each account's open critical / "
+        "high / total counts, plus how many high-risk accounts exist in total (so you can say "
+        "'top N of M'). Returns status 'denied' for non-admin callers; relay that and do not "
+        "retry. It reads only what an admin could already pull — it just aggregates it."
+    ),
+)
+def _get_high_risk_customers(limit: int = 5) -> dict:
+    principal = _principal()
+    result = get_high_risk_customers(principal, limit=limit)
+    return _audit("get_high_risk_customers", principal, f"limit={limit}", result)
+
+
+@mcp.tool(
+    name="detect_patterns",
+    description=(
+        "Admin only. Detect cross-customer patterns among OPEN issues: categories that are "
+        "open at two or more distinct customers — a platform-level signal no single-customer "
+        "view can produce (e.g. 'webhook/integration errors across 4 accounts -> likely a "
+        "platform incident'). Optionally pass window_days to narrow to recently-created issues; "
+        "omit it to consider all open issues. Returns status 'denied' for non-admins; relay it "
+        "and do not retry."
+    ),
+)
+def _detect_patterns(window_days: int | None = None, min_customers: int = 2) -> dict:
+    principal = _principal()
+    result = detect_patterns(principal, window_days=window_days, min_customers=min_customers)
+    return _audit("detect_patterns", principal, f"window_days={window_days}", result)
 
 
 if __name__ == "__main__":

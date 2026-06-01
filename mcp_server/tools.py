@@ -491,3 +491,105 @@ def list_next_actions(principal: Principal,
     }
 
 
+# --- proactive briefing: admin-only fleet aggregates (ADR-008) ----------------
+# Cross-customer oversight reads that power GET /briefing's LangGraph run. Admin-only:
+# an account manager sees their own portfolio via the list_* tools, but the platform-wide
+# risk roll-up + pattern detection is admin oversight. RBAC at the boundary, same as the
+# write tools (the server wrapper audits the access); parameterised SQL throughout (T3).
+# These read nothing the role couldn't already pull — they aggregate it for one call.
+
+
+def get_high_risk_customers(principal: Principal, limit: int = 5) -> dict:
+    """Rank customers by open-issue risk for the admin briefing (admin only).
+
+    'High risk' = at least one OPEN issue (open/in_progress/pending) at critical or high
+    priority — ranked by critical-open, then high-open, then total-open. Age is deliberately
+    NOT a filter here: a long-unresolved critical is exactly the kind of account to surface,
+    so we never window it out. Returns the top `limit` accounts plus `total_count`, so the
+    briefing can say 'top N of M' rather than silently truncating. Non-admins get `denied`.
+    """
+    if denial := _denied(principal, "admin"):
+        return denial
+    lim = max(1, min(int(limit or 5), 25))
+    rows = query(
+        """
+        SELECT c.id, c.name, c.account_ref, c.tier, c.segment,
+               count(*) FILTER (WHERE i.priority = 'critical') AS critical_open,
+               count(*) FILTER (WHERE i.priority = 'high')     AS high_open,
+               count(*)                                        AS total_open
+        FROM customers c
+        JOIN issues i ON i.customer_id = c.id AND i.status = ANY(%s)
+        GROUP BY c.id, c.name, c.account_ref, c.tier, c.segment
+        HAVING count(*) FILTER (WHERE i.priority IN ('critical', 'high')) > 0
+        ORDER BY critical_open DESC, high_open DESC, total_open DESC, c.name ASC
+        LIMIT %s
+        """,
+        (OPEN_STATUSES, lim),
+    )
+    total = _count(
+        """
+        SELECT count(*) AS n FROM (
+            SELECT c.id
+            FROM customers c
+            JOIN issues i ON i.customer_id = c.id AND i.status = ANY(%s)
+            GROUP BY c.id
+            HAVING count(*) FILTER (WHERE i.priority IN ('critical', 'high')) > 0
+        ) AS hr
+        """,
+        (OPEN_STATUSES,),
+    )
+    return {
+        "status": "ok",
+        "customers": rows,
+        "briefed_count": len(rows),
+        "total_count": total,
+        "has_more": len(rows) < total,
+        "note": (f"Briefing the top {len(rows)} of {total} high-risk accounts."
+                 if total > len(rows)
+                 else f"Briefing all {total} high-risk accounts."),
+    }
+
+
+def detect_patterns(principal: Principal, window_days: int | None = None,
+                    min_customers: int = 2) -> dict:
+    """Cross-customer clusters among OPEN issues, for the briefing (admin only).
+
+    Groups open issues by category; a category open at >= `min_customers` distinct customers
+    is a platform-level signal no per-customer flow can see (e.g. 'webhook errors across 4
+    accounts -> likely a platform incident'). `window_days` optionally narrows to issues
+    created in the last N days ('this week's' clusters); omit it to cluster all currently-open
+    issues — the demo-safe default that is never empty when issues are open. Non-admins get
+    `denied`.
+    """
+    if denial := _denied(principal, "admin"):
+        return denial
+    conds = ["i.status = ANY(%s)"]
+    params: list = [OPEN_STATUSES]
+    if window_days:
+        conds.append("i.created_at >= now() - make_interval(days => %s)")
+        params.append(int(window_days))
+    where = "WHERE " + " AND ".join(conds)
+    rows = query(
+        f"""
+        SELECT i.category,
+               count(DISTINCT i.customer_id) AS customer_count,
+               count(*)                      AS issue_count,
+               count(*) FILTER (WHERE i.priority IN ('critical', 'high')) AS severe_count,
+               array_agg(DISTINCT c.name ORDER BY c.name) AS customers
+        FROM issues i
+        JOIN customers c ON c.id = i.customer_id
+        {where}
+        GROUP BY i.category
+        HAVING count(DISTINCT i.customer_id) >= %s
+        ORDER BY customer_count DESC, issue_count DESC
+        """,
+        tuple(params + [max(2, int(min_customers or 2))]),
+    )
+    return {
+        "status": "ok",
+        "window_days": window_days,
+        "patterns": rows,
+        "pattern_count": len(rows),
+    }
+
+
