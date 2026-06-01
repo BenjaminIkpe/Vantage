@@ -87,6 +87,14 @@ services:
       LLM_MODEL: claude-sonnet-4-6
       LLM_API_KEY: ${LLM_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}   # back-compat fallback if LLM_API_KEY unset
+      # Bonus tracing (ADR-008): OpenTelemetry -> self-hosted Phoenix (no egress); LangSmith
+      # is opt-in and only activates when LANGSMITH_API_KEY is provided.
+      TRACING_ENABLED: ${TRACING_ENABLED:-true}
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+      PHOENIX_PROJECT_NAME: vantage
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-vantage}
     # No DATABASE_URL: the API holds no database access — tools run behind the MCP server (ADR-003).
     volumes:
       - skills_data:/data/skills            # authored skills survive a container rebuild
@@ -97,8 +105,18 @@ services:
         condition: service_started
       mcp:
         condition: service_started
+      phoenix:
+        condition: service_started
     ports:
       - "8000:8000"
+
+  phoenix:
+    # Self-hosted observability (ADR-008 bonus tracing): the Phoenix UI + an OTLP collector.
+    # The api exports spans for the reactive loop and the briefing graph here over OTLP — no
+    # trace data leaves the host (the enterprise-safe default; LangSmith is the opt-in extra).
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"   # Phoenix UI + OTLP/HTTP collector (/v1/traces)
 
 volumes:
   pgdata:

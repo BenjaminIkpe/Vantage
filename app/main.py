@@ -38,6 +38,8 @@ from skills import draft_from_session, get_skill, load_skills, run_skill, save_s
 
 logger = logging.getLogger("vantage.api")
 
+import telemetry  # OTel -> Phoenix tracing for the loop + the graph (guarded; safe to import)
+
 # The proactive briefing graph (ADR-008) is optional and isolated behind a guarded import: if
 # LangGraph isn't installed, the rest of the API (reactive loop, UI, auth) is wholly unaffected
 # and only /briefing is disabled.
@@ -56,6 +58,7 @@ async def lifespan(app: FastAPI):
     fall back to an in-process saver if the Redis path fails, so a checkpointer hiccup can never
     stop the api from starting (ADR-008). Redis, not Postgres: the api stays free of the
     system-of-record (ADR-003), and a paused run is ephemeral working memory (ADR-006)."""
+    telemetry.setup_tracing()  # OTel -> Phoenix (+ LangSmith if keyed); before any model call
     cp_cm = None
     if _BRIEFING_AVAILABLE:
         try:

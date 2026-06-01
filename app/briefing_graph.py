@@ -34,6 +34,7 @@ import json
 import operator
 import os
 import re
+from datetime import date
 from typing import Annotated, TypedDict
 
 from langgraph.graph import StateGraph, START, END
@@ -199,8 +200,10 @@ async def draft(state: BriefingState) -> dict:
         for p in patterns
     ) or "none"
     user = (
-        "High-risk accounts and their most urgent open issue:\n" + "\n".join(lines)
-        + f"\n\nCross-customer patterns: {pat_text}\n\nDraft the next actions now."
+        f"Today is {date.today().isoformat()}. High-risk accounts and their most urgent open "
+        "issue:\n" + "\n".join(lines)
+        + f"\n\nCross-customer patterns: {pat_text}\n\nDraft the next actions now. Any due_date "
+        "must be on or after today and near-term (within about two weeks)."
     )
     try:
         raw = await complete(_DRAFT_SYSTEM, user, max_tokens=900)
