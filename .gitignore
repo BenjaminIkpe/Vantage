@@ -21,8 +21,9 @@ dist/
 # obsidian volatile state
 **/.obsidian/workspace*.json
 
-# internal panel prep — kept out of the submission
+# internal panel / study prep — kept out of the submission
 Vantage-vault/08-Panel-Prep.md
+Vantage-vault/14-Study-Guide.md
 
 # local caches
 .cache/
