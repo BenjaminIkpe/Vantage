@@ -21,7 +21,12 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    # Redis Stack (server, headless) — a strict superset of plain Redis. Session memory uses
+    # only core commands (unaffected); the extra RediSearch + RedisJSON modules back the
+    # LangGraph durable checkpointer for the briefing's HITL pause/resume (ADR-008). The
+    # `-server` variant omits RedisInsight, which would otherwise expose 8001 and collide
+    # with the MCP service. Same port 6379, same `redis-cli ping` healthcheck.
+    image: redis/redis-stack-server:latest
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
