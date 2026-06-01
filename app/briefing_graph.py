@@ -371,3 +371,61 @@ async def approve_briefing(briefing_id: str, principal: Principal, token: str,
         "drafts": snap2.values.get("drafts", []),
         "results": snap2.values.get("results", []),
     }
+
+
+async def stream_briefing(briefing_id: str, principal: Principal, token: str,
+                          limit: int | None = None, window_days: int | None = None):
+    """Async generator version of start_briefing: yields progress events as each graph node
+    completes (LangGraph `astream`), then a final `done` with the drafts. Powers the UI's live
+    'running across the fleet' checklist so a ~tens-of-seconds run never looks frozen.
+
+    Event dicts (the SSE wrapper serialises them):
+      {"event": "step", "data": {"node": "plan",          "accounts": [...], "count": N}}
+      {"event": "step", "data": {"node": "summarise_one", "customer": "..."}}   # one per account
+      {"event": "step", "data": {"node": "detect",        "count": N}}
+      {"event": "step", "data": {"node": "draft",         "count": N}}
+      {"event": "done", "data": {briefing_id, pending_approval, coverage, summaries, patterns, drafts}}
+      {"event": "error","data": {"detail": "..."}}
+    """
+    graph = _graph()
+    config = _config(briefing_id)
+    inputs = {
+        "token": token,
+        "username": principal.username,
+        "roles": principal.roles,
+        "subject": principal.subject,
+        "limit": limit or DEFAULT_BRIEF_LIMIT,
+        "window_days": window_days,
+    }
+    try:
+        async for chunk in graph.astream(inputs, config, stream_mode="updates"):
+            for node, update in (chunk or {}).items():
+                update = update or {}
+                if node == "plan":
+                    custs = update.get("customers") or []
+                    yield {"event": "step", "data": {
+                        "node": "plan",
+                        "accounts": [c.get("name") for c in custs],
+                        "count": len(custs),
+                    }}
+                elif node == "summarise_one":
+                    for s in (update.get("summaries") or []):
+                        yield {"event": "step", "data": {"node": "summarise_one", "customer": s.get("customer")}}
+                elif node == "detect":
+                    yield {"event": "step", "data": {"node": "detect", "count": len(update.get("patterns") or [])}}
+                elif node == "draft":
+                    yield {"event": "step", "data": {"node": "draft", "count": len(update.get("drafts") or [])}}
+        # The graph paused at the approval gate (or completed) — read the final state.
+        snap = await graph.aget_state(config)
+        vals = snap.values
+        yield {"event": "done", "data": {
+            "briefing_id": briefing_id,
+            "pending_approval": bool(snap.next),
+            "coverage": vals.get("coverage", {}),
+            "summaries": vals.get("summaries", []),
+            "patterns": vals.get("patterns", []),
+            "drafts": vals.get("drafts", []),
+            "results": vals.get("results", []),
+        }}
+    except Exception:
+        yield {"event": "error", "data": {"detail": "briefing failed"}}

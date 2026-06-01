@@ -531,3 +531,26 @@ async def briefing_approve(briefing_id: str, req: ApproveRequest, caller: Authed
     if result is None:
         raise HTTPException(status_code=404, detail="briefing not found or expired")
     return result
+
+
+@app.get("/briefing/stream")
+async def briefing_stream(caller: Authed = Depends(authed)):
+    """Streaming variant of GET /briefing (admin only): Server-Sent Events emitting a `step`
+    per graph node as it completes, then a `done` with the drafts — so the UI shows live
+    progress instead of a tens-of-seconds blank wait. Same graph + RBAC as /briefing; the
+    non-streaming /briefing stays for the eval harness + as a fallback."""
+    if not _BRIEFING_AVAILABLE:
+        raise HTTPException(status_code=503, detail="briefing unavailable (LangGraph not installed)")
+    _require_admin(caller)
+    briefing_id = oidc.gen_sid()
+
+    async def event_stream():
+        try:
+            async for evt in briefing_graph.stream_briefing(briefing_id, caller.principal, caller.token):
+                yield f"event: {evt['event']}\ndata: {_json.dumps(evt['data'], default=str)}\n\n"
+        except Exception:
+            logger.exception("briefing stream failed (briefing=%s)", briefing_id)
+            yield f"event: error\ndata: {_json.dumps({'detail': 'internal error — please try again'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})

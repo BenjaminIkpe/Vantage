@@ -139,6 +139,24 @@
     .spin { animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Branded 'thinking' mark — a spinning accent halo around the Vantage V, for long-running
+       ops (the briefing wait; reusable elsewhere). The V gently breathes. */
+    .brand-think { position: relative; width: 46px; height: 46px; display: grid; place-items: center; }
+    .brand-think::before {
+      content: ""; position: absolute; inset: -3px; border-radius: 15px;
+      background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 90deg, transparent 210deg);
+      animation: spin 1.1s linear infinite;
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+              mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    }
+    .brand-mark {
+      width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
+      font-weight: 700; font-size: 18px; font-family: 'Geist Mono', ui-monospace, monospace;
+      background: linear-gradient(135deg, var(--accent), oklch(0.78 0.12 55)); color: var(--accent-ink);
+      animation: brand-breathe 2.2s ease-in-out infinite;
+    }
+    @keyframes brand-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; }
       .caret { animation: none; opacity: 1; }
@@ -715,12 +733,27 @@
         </button>
       </div>
 
-      <!-- loading -->
+      <!-- loading: branded 'thinking' mark + live progress checklist (streamed from the graph) -->
       <template x-if="briefingLoading">
-        <div class="px-5 py-12 flex flex-col items-center gap-3 text-center">
-          <svg class="w-5 h-5 spin text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.55"/></svg>
+        <div class="px-5 py-7 flex flex-col items-center gap-4">
+          <div class="brand-think"><div class="brand-mark">V</div></div>
           <div class="text-[13px] text-textsoft">Running the briefing across the fleet…</div>
-          <div class="text-2xs text-textmuted max-w-[360px] leading-relaxed">Ranking the high-risk accounts, summarising each, detecting cross-customer patterns, and drafting next actions. This takes a moment.</div>
+          <div class="w-full max-w-[380px] flex flex-col gap-1.5">
+            <template x-for="s in briefingSteps" :key="s.key">
+              <div class="flex items-center gap-2.5 text-[12.5px]">
+                <template x-if="s.status === 'done'">
+                  <svg class="w-3.5 h-3.5 flex-none" style="color: var(--ok);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"/></svg>
+                </template>
+                <template x-if="s.status === 'active'">
+                  <svg class="w-3.5 h-3.5 flex-none spin text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.55"/></svg>
+                </template>
+                <template x-if="s.status === 'pending'">
+                  <span class="flex-none w-3.5 grid place-items-center"><span class="w-1.5 h-1.5 rounded-full" style="background: var(--line);"></span></span>
+                </template>
+                <span :class="s.status === 'pending' ? 'text-textmuted' : (s.status === 'done' ? 'text-textsoft' : 'text-text')" x-text="s.label"></span>
+              </div>
+            </template>
+          </div>
         </div>
       </template>
 

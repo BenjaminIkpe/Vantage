@@ -130,6 +130,7 @@ window.vantage = function () {
     briefingApproving: false,
     briefing: null,        // { briefing_id, coverage, patterns, summaries, drafts }
     briefingResults: null, // set after approve: the written next actions
+    briefingSteps: [],     // live progress checklist while the graph streams
 
     // toast
     toast: "",
@@ -821,27 +822,88 @@ window.vantage = function () {
       await this.runBriefing();
     },
     async runBriefing() {
+      // Stream the graph's progress (GET /briefing/stream, SSE) so the wait shows a live
+      // checklist instead of a blank spinner. Each `step` event lights up a phase; `done`
+      // carries the drafts. Same SSE frame parsing as the chat's /ask/stream.
       this.briefingLoading = true;
       this.briefingResults = null;
+      this.briefing = null;
+      this.briefingSteps = [
+        { key: "plan",   label: "Ranking the high-risk fleet",       status: "active" },
+        { key: "detect", label: "Detecting cross-customer patterns", status: "pending" },
+        { key: "draft",  label: "Drafting next actions",             status: "pending" },
+      ];
       try {
-        const r = await fetch("/briefing", { credentials: "include" });
+        const r = await fetch("/briefing/stream", {
+          credentials: "include", headers: { "Accept": "text/event-stream" },
+        });
         if (r.status === 403) { this.flash("The briefing is admin-only."); this.showBriefing = false; return; }
-        if (!r.ok) {
+        if (!r.ok || !r.body) {
           const detail = await r.text().catch(() => `${r.status}`);
           this.flash(`Briefing failed (${r.status}): ${detail.slice(0, 140)}`);
           this.showBriefing = false;
           return;
         }
-        const data = await r.json();
-        // Default every draft to selected — the admin reviews and unchecks, rather than re-checks.
-        (data.drafts || []).forEach((d) => { d._selected = true; });
-        this.briefing = data;
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let sep;
+          while ((sep = buffer.indexOf("\n\n")) !== -1) {
+            const frame = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            let evtName = "message";
+            const dataLines = [];
+            for (const line of frame.split("\n")) {
+              if (line.startsWith("event:")) evtName = line.slice(6).trim();
+              else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+            }
+            if (!dataLines.length) continue;
+            let data;
+            try { data = JSON.parse(dataLines.join("\n")); } catch { continue; }
+            this._handleBriefingEvent(evtName, data);
+          }
+        }
       } catch (e) {
         this.flash(`Network error running briefing: ${e.message || e}`);
         this.showBriefing = false;
       } finally {
         this.briefingLoading = false;
       }
+    },
+    _handleBriefingEvent(evt, data) {
+      if (evt === "step") {
+        if (data.node === "plan") {
+          this._briefStepDone("plan", `Ranked the fleet — ${data.count} account${data.count === 1 ? "" : "s"}`);
+          // The per-account summaries run in parallel — show one active line each, right
+          // after the plan step, and check them off as their `summarise_one` events arrive.
+          const accts = (data.accounts || []).filter(Boolean).map((name) => ({
+            key: "cust:" + name, label: "Summarising " + name, status: "active",
+          }));
+          const i = this.briefingSteps.findIndex((s) => s.key === "plan");
+          this.briefingSteps.splice(i + 1, 0, ...accts);
+        } else if (data.node === "summarise_one") {
+          this._briefStepDone("cust:" + data.customer, "Summarised " + data.customer);
+        } else if (data.node === "detect") {
+          this._briefStepDone("detect", `Detected ${data.count} cross-customer pattern${data.count === 1 ? "" : "s"}`);
+        } else if (data.node === "draft") {
+          this._briefStepDone("draft", `Drafted ${data.count} next action${data.count === 1 ? "" : "s"}`);
+        }
+      } else if (evt === "done") {
+        (data.drafts || []).forEach((d) => { d._selected = true; });
+        this.briefing = data;
+        this.briefingLoading = false;  // flip from the checklist to the drafts view
+      } else if (evt === "error") {
+        this.flash("Briefing failed: " + (data.detail || "error"));
+        this.showBriefing = false;
+      }
+    },
+    _briefStepDone(key, label) {
+      const s = this.briefingSteps.find((x) => x.key === key);
+      if (s) { s.status = "done"; if (label) s.label = label; }
     },
     briefingSelected() {
       return (this.briefing?.drafts || []).filter((d) => d._selected);
