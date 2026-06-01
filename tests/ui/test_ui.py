@@ -103,8 +103,10 @@ class TestBasicChat:
     def test_send_via_enter_shows_user_bubble(self, page_support: Page):
         msg = "Open issues for Velocity Marketplace?"
         send_message(page_support, msg)
-        # User bubble appears (text matches)
-        page_support.wait_for_selector(f"text=/{re.escape(msg[:30])}/", timeout=5_000)
+        # Assert the VISIBLE user bubble. Match the full message (incl. the trailing '?') so it
+        # doesn't also match the welcome-screen starter chip of the same prefix, and take .last
+        # (the bubble renders after the chips in DOM order) so we never lock onto a hidden chip.
+        expect(page_support.get_by_text(msg, exact=False).last).to_be_visible(timeout=5_000)
 
     def test_send_via_button_works(self, page_support: Page):
         inp = page_support.locator(SEL["chat_input"])
