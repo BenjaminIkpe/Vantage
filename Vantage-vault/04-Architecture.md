@@ -23,7 +23,7 @@ updated: 2026-05-29
 ## Component map (Docker Compose services)
 - **App / API** — entry point (FastAPI assumed); validates the Keycloak token, runs the agent loop.
 - **Agent loop** — gives Claude (via a thin, swappable model adapter) the tool list; executes chosen tools; returns the answer.
-- **MCP server** — exposes the nine named tools over HTTP; each tool checks role, then queries Postgres.
+- **MCP server** — exposes the eleven named tools over HTTP; each tool checks role, then queries Postgres.
 - **PostgreSQL** — durable store.
 - **Redis** — multi-turn session memory.
 - **Keycloak** — authentication + role issuance.

@@ -49,7 +49,7 @@ The scaling risk that *isn't* about data volume is **the agent side: tool select
 - **Dynamic tool discovery / filtering** (filter to relevant tools per query — *retrieval over tools*).
 - **Specialised agents** with smaller, focused toolsets.
 
-MCP's `list_tools` makes this easier (we already discover dynamically). At 5–6 tools we're nowhere near it — but it's the next thing to flag in the panel.
+MCP's `list_tools` makes this easier (we already discover dynamically). At 11 tools we're nowhere near it — but it's the next thing to flag in the panel.
 
 ## Bottom line
 > The system scales to thousands of customers without changing the agent contract, because tool-based retrieval bounds context to a query-scoped slice — the database can grow; the prompt's shape doesn't. RAG isn't the upgrade path *for what we have*; it's an **additional capability** added as one more MCP tool (likely pgvector in-place) when retrieval becomes semantic over unstructured text. The genuine scaling worry isn't the DB — it's tool selection if the tool surface gets large, which has its own well-known patterns.

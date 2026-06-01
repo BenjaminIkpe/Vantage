@@ -13,7 +13,7 @@ supersedes:
 **Date:** 2026-05-27
 
 ## Context
-The brief requires the database seeded with representative data sufficient to demonstrate all capabilities, plus an eval set that needs stable ground truth. Data must fit our 5-table schema, exercise all 5 tools + the Escalation Summary Skill, and plant specific eval scenarios.
+The brief requires the database seeded with representative data sufficient to demonstrate all capabilities, plus an eval set that needs stable ground truth. Data must fit our 5-table schema, exercise all 11 tools + the Escalation Summary Skill, and plant specific eval scenarios.
 
 ## Decision
 **Generate a hybrid synthetic dataset once, review it, and commit it as a static seed file** (SQL/JSON) in the repo; the DB loads it on `docker compose up`.

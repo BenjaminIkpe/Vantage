@@ -109,8 +109,10 @@ A multi-tool query — proves **dynamic tool selection**: `get_open_issues` → 
 | get_customer_profile (read) | ✅ | ✅ | ✅ |
 | get_open_issues (read) | ✅ | ✅ | ✅ |
 | summarise_issue_history (read) | ✅ | ✅ | ✅ |
-| **update_issue** (write) — *5th tool* | 🚫 | ✅ | ✅ |
+| list_customers · list_issues · list_next_actions (browse, read) | ✅ | ✅ | ✅ |
+| **update_issue** (write) | 🚫 | ✅ | ✅ |
 | create / update_next_action (write) | 🚫 | 🚫 | ✅ |
+| get_high_risk_customers · detect_patterns (admin-only fleet) | 🚫 | 🚫 | ✅ |
 | Escalation Summary Skill (read synthesis) | ✅ | ✅ | ✅ |
 
 ---

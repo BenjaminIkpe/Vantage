@@ -58,7 +58,7 @@ It does **not** hold:
 Source platforms have started exposing their own context layers **over MCP** — Atlassian's Teamwork Graph already exposes via MCP to Microsoft Copilot. The realistic shape isn't "Vantage writes 10 connectors":
 
 ```
-Vantage  --MCP-->  Vantage's own MCP server  (today's 9 named tools)
+Vantage  --MCP-->  Vantage's own MCP server  (today's 11 named tools)
          --MCP-->  Atlassian MCP server       (Teamwork Graph)
          --MCP-->  Salesforce / Zendesk MCP   (when they ship)
          --MCP-->  Acme's in-house ops MCP    (custom internal tools)
@@ -72,7 +72,7 @@ The dividend of [ADR-003](05-Decisions/ADR-003-mcp-server.md) lands hardest here
 | Layer | Today (assessment) | Production (Acme stack) | Change? |
 |---|---|---|---|
 | Agent loop ([ADR-001](05-Decisions/ADR-001-agent-framework.md)) | Claude + tools | Claude + tools | **none** |
-| 5 tool names / signatures | `get_open_issues(customer)`… | `get_open_issues(customer)`… | **none** |
+| 11 tool names / signatures | `get_open_issues(customer)`… | `get_open_issues(customer)`… | **none** |
 | RBAC at the tool boundary ([ADR-002](05-Decisions/ADR-002-rbac-tool-boundary.md)) | inside each tool | inside each tool | **none** |
 | Skills (runner, whitelist, authoring) | unchanged | unchanged | **none** |
 | Redis multi-turn memory | unchanged | unchanged | **none** |

@@ -12,6 +12,9 @@ supersedes:
 **Status:** accepted
 **Date:** 2026-05-27
 
+> [!NOTE] Update (2026-05-30) — revisit trigger fired
+> This ADR governs the **reactive `/ask` loop** and still stands for it. But the **proactive briefing** needs exactly what the revisit trigger named — parallel fan-out + human-in-the-loop + durable pause/resume — so that one path is built as a **LangGraph** graph: see [ADR-008](ADR-008-langgraph-proactive-path.md). The result is a deliberate **hybrid** (loop for reactive, graph where its triggers fire), not a reversal of this decision.
+
 ## Context
 We're building Vantage, an agentic assistant. The brief (§4.1) requires the agent to **select tools dynamically** based on the query — "prompt-only solutions that bypass tool use will not satisfy." So it must be the *agent* pattern (LLM-driven tool selection), not a hard-coded workflow.
 
@@ -29,7 +32,7 @@ Two constraints baked in from day one:
 - **Designed for a contained LangGraph migration later** — tools are standalone functions exposed via the MCP server; session state is explicit and serializable (in Redis); the loop lives in one module. A future move to LangGraph swaps only the orchestration layer; tools, data, RBAC, MCP, and evals all carry over.
 
 ## Alternatives considered
-- **LangGraph (graph orchestration).** *Rejected for v1.* Its value-adds — durable execution, HITL, parallelism, complex branching/retry — none apply to a single-agent, five-tool, request/response flow. It would add abstraction we'd have to explain and defend with no benefit, against Anthropic's own guidance to avoid unnecessary framework layers. Reserved for if the flow grows (see revisit trigger). Reference point: a separate, more complex agent design (parallel screening + a human sign-off gate) *did* warrant LangGraph — this doesn't.
+- **LangGraph (graph orchestration).** *Rejected for v1.* Its value-adds — durable execution, HITL, parallelism, complex branching/retry — none apply to a single-agent, five-tool, request/response flow. It would add abstraction we'd have to explain and defend with no benefit, against Anthropic's own guidance to avoid unnecessary framework layers. Reserved for if the flow grows (see revisit trigger) — **which it now has: the proactive briefing is built as a LangGraph graph ([ADR-008](ADR-008-langgraph-proactive-path.md))**. Reference point: a separate, more complex agent design (parallel screening + a human sign-off gate) *did* warrant LangGraph — this doesn't.
 - **Hard-coded workflow (fixed tool sequence).** *Rejected* — conflicts with the brief's "must select tools dynamically" requirement.
 
 ## Consequences

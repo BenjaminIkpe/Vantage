@@ -13,10 +13,10 @@ supersedes:
 **Date:** 2026-05-27
 
 ## Context
-The brief requires ≥1 MCP (Model Context Protocol) server and asks us to explain *why MCP* and *how it separates tools from agent logic*. Our five tools touch Postgres and must enforce RBAC (ADR-002). Two sub-decisions: what kind of server, and which transport.
+The brief requires ≥1 MCP (Model Context Protocol) server and asks us to explain *why MCP* and *how it separates tools from agent logic*. Our tools — eleven today (3 reads, 3 writes, 3 browse, 2 admin-only fleet) — touch Postgres and must enforce RBAC (ADR-002). Two sub-decisions: what kind of server, and which transport.
 
 ## Decision
-**A custom MCP server exposing our five named, typed, RBAC-checked tools** (`get_customer_profile`, `get_open_issues`, `summarise_issue_history`, `update_issue`, `create`/`update_next_action`). The agent never sees or writes raw SQL.
+**A custom MCP server exposing our named, typed, RBAC-checked tools** — five at decision time (`get_customer_profile`, `get_open_issues`, `summarise_issue_history`, `update_issue`, `create`/`update_next_action`), since grown to **eleven** (+ `list_customers`/`list_issues`/`list_next_actions` browse, PR #21; + `get_high_risk_customers`/`detect_patterns` admin-only fleet, ADR-008). The agent never sees or writes raw SQL.
 
 **Transport: Streamable HTTP**, with the MCP server as its own Docker Compose service. **stdio is the documented fallback** if the cross-boundary auth proves painful — a contained switch (per ADR-001), since tools and RBAC don't move.
 
