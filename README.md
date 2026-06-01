@@ -15,7 +15,7 @@ git clone <this repo>
 cd Vantage
 cp .env.example .env
 # edit .env and set: ANTHROPIC_API_KEY=sk-ant-...
-docker compose up --build      # db + redis + keycloak + mcp + api
+docker compose up --build      # db + redis + keycloak + mcp + api + phoenix
 ```
 
 First boot takes ~60s (Keycloak imports the realm, Postgres loads the seed). Check readiness: `curl localhost:8000/ready`.
@@ -42,30 +42,39 @@ You should see tokens stream in, then click **show thinking** under the answer t
 flowchart TD
     User(["User — sales / support / admin"])
     subgraph Stack["Docker Compose · private network"]
-        API["API · FastAPI<br/>validates token, runs the agent loop,<br/>session memory, Skills"]
+        API["API · FastAPI<br/>token, agent loop, session memory, Skills, briefing"]
         KC["Keycloak<br/>authentication + roles"]
         Loop["Agent loop<br/>Claude · MCP client"]
-        MCP["MCP server · Streamable HTTP<br/>9 named tools · re-verifies token · RBAC per tool"]
-        Redis[("Redis<br/>session memory · TTL")]
+        Brief["Briefing graph · LangGraph<br/>fleet fan-out · patterns · HITL approval"]
+        MCP["MCP server · Streamable HTTP<br/>11 named tools · re-verifies token · RBAC per tool"]
+        Redis[("Redis Stack<br/>session memory + graph checkpoints")]
         PG[("PostgreSQL<br/>system of record")]
+        PX[("Phoenix<br/>OTel traces")]
     end
     User -->|"query + Keycloak JWT"| API
     API -.->|"verify JWT (JWKS)"| KC
     API --> Loop
+    API -->|"admin · GET /briefing"| Brief
     Loop <-->|"conversation context"| Redis
+    Brief <-->|"durable checkpoint · HITL pause/resume"| Redis
     Loop -->|"tool call + forwarded JWT"| MCP
+    Brief -->|"same tools + RBAC"| MCP
     MCP -.->|"re-verify JWT"| KC
     MCP -->|"allowed → parameterised SQL"| PG
     MCP -.->|"denied → logged refusal"| Loop
+    Loop -.->|"spans"| PX
+    Brief -.->|"spans"| PX
 ```
 
 - **Agent** = a minimal Claude **tool-calling loop**, not a framework ([ADR-001](Vantage-vault/05-Decisions/ADR-001-agent-framework.md)); model-agnostic via `app/llm.py`.
-- **MCP server** exposes the nine named tools over Streamable HTTP ([ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)); the agent *discovers* and *calls* them — it never sees SQL and never holds DB credentials.
+- **MCP server** exposes the eleven named tools over Streamable HTTP ([ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)); the agent *discovers* and *calls* them — it never sees SQL and never holds DB credentials.
 - **RBAC is enforced inside each tool**, on the Keycloak token **re-verified at the MCP boundary** ([ADR-002](Vantage-vault/05-Decisions/ADR-002-rbac-tool-boundary.md)) — never in the prompt.
 - **Postgres** = system of record; **Redis** = ephemeral multi-turn session memory ([ADR-006](Vantage-vault/05-Decisions/ADR-006-memory-split.md)).
+- **Proactive briefing** = an admin-only **LangGraph** graph ([ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)) — the hybrid's *second* execution shape: fleet fan-out → cross-customer patterns → AI-drafted next actions → **human-in-the-loop approval** (durable pause/resume on a Redis checkpointer). The simple loop still serves reactive `/ask`; the graph is used only where its triggers (parallelism + HITL + durable runs) actually fire.
+- **Tracing** = OpenTelemetry → self-hosted **Phoenix** (no egress) for both the loop and the graph; **LangSmith** opt-in via a key.
 
-## The nine tools
-Six point-lookup / write tools, plus three browse/list tools added once real usage showed exploration needs (PR #21).
+## The eleven tools
+Six point-lookup / write tools, three browse/list tools (PR #21), plus two admin-only fleet aggregates that power the proactive briefing ([ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)).
 | Tool | Does | Roles |
 |---|---|---|
 | `get_customer_profile` | resolve a customer by name (found / ambiguous / not_found) | all |
@@ -76,6 +85,8 @@ Six point-lookup / write tools, plus three browse/list tools added once real usa
 | `list_customers` | browse/filter customers (region, segment, tier, account manager); paginated | all |
 | `list_issues` | browse/filter issues across customers (status, priority, category); paginated | all |
 | `list_next_actions` | browse/filter next actions (overdue, status, customer); paginated | all |
+| `get_high_risk_customers` | rank accounts by open critical/high issues (fleet view) | admin |
+| `detect_patterns` | cross-customer clusters among open issues ("likely platform") | admin |
 
 A disallowed call writes nothing, returns a structured `denied`, and is **audit-logged**.
 
@@ -83,6 +94,18 @@ A disallowed call writes nothing, returns a structured `denied`, and is **audit-
 Reusable, named capabilities (the Anthropic *Agent Skill* pattern, packaged here as JSON): instructions + parameters + an `allowed_tools` whitelist, run through the agent loop. A Skill is *just a prompt + a tool whitelist*, so it can never exceed the caller's permissions.
 - Seeded: **Customer Escalation Summary** — risk level + rationale + recommended next action (advice) + missing info; read-only, persists nothing.
 - Users can **author their own** by turning a finished session into a skill (`POST /skills/draft-from-session` → review → `POST /skills`).
+
+## Proactive briefing (LangGraph + human-in-the-loop)
+The reactive loop answers what a user asks. The **proactive briefing** (`GET /briefing`, admin-only) is the counterpart: one call ranks the high-risk fleet, **composes the escalation-summary skill across every flagged account in parallel**, detects **cross-customer patterns** no per-account view can see, and **drafts a next action per account** — then **pauses for human approval** before anything is written.
+
+This is the one place a simple loop genuinely strains — parallel fan-out, a human-in-the-loop gate, durable pause/resume — so it's built as a **LangGraph graph**, while `/ask` keeps the minimal loop. The decision (and why *not* a rewrite) is [ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md). The graph calls the **same MCP tools across the same RBAC boundary**; the run pauses at an `interrupt()` and resumes on `POST /briefing/{id}/approve`, writing each approved draft via `create_next_action` **with the approving admin's token** — so the approval *is* the authorisation. State is checkpointed in **Redis** (durable across the pause; the API stays free of the system-of-record, [ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)). The whole feature sits behind a guarded import — if LangGraph were absent, `/ask` and the UI are entirely unaffected.
+
+```bash
+# as admin (Dana): run the briefing, then approve selected drafts
+curl -s localhost:8000/briefing -H "Authorization: Bearer $TOKEN"            # → {briefing_id, drafts[], patterns[], pending_approval:true}
+curl -s -X POST localhost:8000/briefing/$ID/approve -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"approved_ids":[0]}'              # → writes the approved next action(s)
+```
 
 ## Chat UI
 
@@ -112,6 +135,8 @@ The browser flow uses real **OIDC Auth-Code + PKCE + BFF cookie** (the access to
 - `POST /followups` `{query, answer}` — up to 3 role-aware follow-up suggestions for the last exchange.
 - `GET /skills` · `POST /skills/{name}/run` `{params}` — list / invoke Skills.
 - `POST /skills/draft-from-session` · `POST /skills` — author a Skill from a session, then save.
+- `GET /briefing` — **admin-only** proactive fleet briefing; runs the LangGraph graph to the approval gate and returns `{briefing_id, summaries, patterns, drafts, pending_approval}`.
+- `POST /briefing/{id}/approve` `{approved_ids}` — **admin-only**; resume the paused briefing and write the approved next actions (the approver's token authorises each write). `404` if the briefing is unknown/expired.
 - `GET /auth/login` · `GET /auth/callback` · `GET /auth/logout` · `GET /auth/switch?username=<persona>` · `GET /auth/whoami` — the BFF auth surface.
 - `GET /health` · `GET /ready`.
 
@@ -121,6 +146,8 @@ JWT fully verified (signature/issuer/expiry, `alg` pinned); RBAC at the tool bou
 ## Observability
 Every `/ask` returns a `trace` of tool calls (input, result status, per-tool `ms`) + total `elapsed_ms`; write attempts emit a server-side **audit log** line (`user / roles / target / decision`); tool/agent errors surface as a `502` on `/ask` or a streamed `error` event on `/ask/stream`, with a **generic** message — internals are logged server-side, never returned to the client.
 
+On top of that, **OpenTelemetry tracing** exports spans to a self-hosted **Arize Phoenix** service (UI at `localhost:6006`) — OpenInference auto-instruments the OpenAI SDK (every model call in the loop *and* the briefing) and LangChain/LangGraph (the briefing graph's nodes, so the parallel fan-out and the approval gate are visible as a span tree). Nothing leaves the host; **LangSmith** is wired as an opt-in second backend that activates only when `LANGSMITH_API_KEY` is set (the stated bonus tracing — [ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)).
+
 ## Evaluation
 13 runnable cases proving tool-selection, grounding (E1/E2/E3), RBAC (allow + deny), multi-turn memory, the Skill, the browse tools, and auth — see [`07-Evals.md`](Vantage-vault/07-Evals.md). Run against the live stack:
 ```bash
@@ -128,8 +155,8 @@ python eval/run_evals.py        # latest: 13/13 passed
 ```
 
 ## Repo layout
-- `app/` — FastAPI API, agent loop (MCP client), session memory, Skills
-- `mcp_server/` — the MCP server: the nine tools, DB access, token re-verification
+- `app/` — FastAPI API, agent loop (MCP client), session memory, Skills, the briefing graph (`briefing_graph.py`), tracing (`telemetry.py`)
+- `mcp_server/` — the MCP server: the eleven tools, DB access, token re-verification
 - `db/` — `schema.sql` + `seed.sql` (committed; generator in `scripts/`)
 - `keycloak/` — realm config (roles + dev users)
 - `eval/` — evaluation harness
