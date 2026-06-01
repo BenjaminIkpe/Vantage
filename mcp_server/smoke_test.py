@@ -64,8 +64,10 @@ async def read_checks(token: str):
         names = sorted(t.name for t in (await session.list_tools()).tools)
         print("discovered tools:", names)
         assert names == [
-            "create_next_action", "get_customer_profile", "get_open_issues",
-            "summarise_issue_history", "update_issue", "update_next_action",
+            "create_next_action", "detect_patterns", "get_customer_profile",
+            "get_high_risk_customers", "get_open_issues", "list_customers",
+            "list_issues", "list_next_actions", "summarise_issue_history",
+            "update_issue", "update_next_action",
         ], names
         hero = _payload(await session.call_tool("get_open_issues", {"name": "Velocity Marketplace"}))
         assert hero["status"] == "found" and hero["open_count"] >= 3, hero
@@ -112,6 +114,24 @@ async def write_matrix():
     r = await call(admin, "update_next_action", {"next_action_id": na_id, "status": "done"})
     assert r["status"] == "updated" and r["next_action"]["status"] == "done", r
     print(f"OK: admin update_next_action -> {r['status']} (now {r['next_action']['status']})")
+
+    # admin MAY read the fleet aggregates (ADR-008 briefing reads)
+    r = await call(admin, "get_high_risk_customers", {"limit": 5})
+    assert r["status"] == "ok" and r["briefed_count"] >= 1, r
+    print(f"OK: admin get_high_risk_customers -> {r['status']} ({r['briefed_count']} of {r['total_count']})")
+
+    r = await call(admin, "detect_patterns", {})
+    assert r["status"] == "ok", r
+    print(f"OK: admin detect_patterns -> {r['status']} ({r['pattern_count']} patterns)")
+
+    # sales / support may NOT — the fleet roll-up is admin-only oversight (denied, no data)
+    r = await call(sales, "get_high_risk_customers", {})
+    assert r["status"] == "denied", r
+    print(f"OK: sales get_high_risk_customers -> {r['status']}")
+
+    r = await call(support, "detect_patterns", {})
+    assert r["status"] == "denied", r
+    print(f"OK: support detect_patterns -> {r['status']}")
 
 
 async def expect_rejected():

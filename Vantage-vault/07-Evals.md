@@ -69,3 +69,19 @@ Run:
 ```bash
 python eval/run_robustness.py        # exits non-zero on any failure
 ```
+
+## Briefing suite — the proactive admin briefing (ADR-008)
+The briefing (`GET /briefing`) is a different surface from `/ask` — a **LangGraph** graph with a human-in-the-loop gate ([ADR-008](05-Decisions/ADR-008-langgraph-proactive-path.md)) — so it has its own runnable suite, [`eval/run_briefing.py`](../eval/run_briefing.py), asserting deterministic signals only (HTTP status, response shape, tool-grounded ids, the created `next_action`):
+
+| # | Check | Proves |
+|---|---|---|
+| B1 / B2 | sales + support `GET /briefing` → **403** | admin-only — RBAC at the entry *and* the fleet-aggregate tools |
+| B3 | admin `GET /briefing` → 200, ≥1 account summarised, `pending_approval: true` | the fan-out runs; the **HITL gate** pauses the run |
+| B4 | every draft's `issue_id` ∈ the issues the run actually fetched | **grounding** — no proposals against invented issues |
+| B5 | approve a draft → a `next_action` is **created**; unapproved → **skipped** | resume + write, with the **approver's** token authorising it |
+| B6 | approve an unknown briefing id → **404** | clean handling, not a 500 |
+
+**Latest run: 11 / 11 checks passed** (Codespace, against the committed seed). Run:
+```bash
+python eval/run_briefing.py
+```

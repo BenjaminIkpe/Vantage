@@ -5,3 +5,14 @@ pyjwt[crypto]>=2.9
 redis>=5.0
 openai>=1.50
 mcp>=1.27
+# Proactive briefing graph (ADR-008): LangGraph + a durable Redis (Stack) checkpointer for
+# the HITL pause/resume. Only the briefing path imports these; the reactive loop does not.
+langgraph>=0.2.60
+langgraph-checkpoint-redis>=0.0.5
+# Bonus tracing (ADR-008): OpenTelemetry -> self-hosted Phoenix, auto-instrumenting the OpenAI
+# SDK (reactive loop + briefing) and LangChain/LangGraph (the graph). LangSmith ships with
+# langgraph; it activates only when LANGSMITH_API_KEY is set.
+arize-phoenix-otel>=0.6
+openinference-instrumentation-openai>=0.1.18
+openinference-instrumentation-langchain>=0.1.29
+opentelemetry-exporter-otlp>=1.27

@@ -1,6 +1,7 @@
 """Vantage API — auth-gated entry point. See Vantage-vault/04-Architecture.md."""
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -35,8 +36,62 @@ from session import (
 )
 from skills import draft_from_session, get_skill, load_skills, run_skill, save_skill
 
-app = FastAPI(title="Vantage API")
 logger = logging.getLogger("vantage.api")
+
+import telemetry  # OTel -> Phoenix tracing for the loop + the graph (guarded; safe to import)
+
+# The proactive briefing graph (ADR-008) is optional and isolated behind a guarded import: if
+# LangGraph isn't installed, the rest of the API (reactive loop, UI, auth) is wholly unaffected
+# and only /briefing is disabled.
+try:
+    import briefing_graph
+    _BRIEFING_AVAILABLE = True
+except Exception:  # pragma: no cover - import-time guard
+    briefing_graph = None
+    _BRIEFING_AVAILABLE = False
+    logger.exception("briefing graph unavailable (LangGraph not installed?) — /briefing disabled")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Give the briefing graph a durable Redis (Stack) checkpointer for its HITL pause/resume;
+    fall back to an in-process saver if the Redis path fails, so a checkpointer hiccup can never
+    stop the api from starting (ADR-008). Redis, not Postgres: the api stays free of the
+    system-of-record (ADR-003), and a paused run is ephemeral working memory (ADR-006)."""
+    telemetry.setup_tracing()  # OTel -> Phoenix (+ LangSmith if keyed); before any model call
+    cp_cm = None
+    if _BRIEFING_AVAILABLE:
+        try:
+            try:
+                from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+            except Exception:
+                from langgraph.checkpoint.redis import AsyncRedisSaver
+            cp_cm = AsyncRedisSaver.from_conn_string(os.getenv("REDIS_URL", "redis://redis:6379/0"))
+            checkpointer = await cp_cm.__aenter__()
+            await checkpointer.asetup()
+            logger.info("briefing checkpointer: Redis (durable)")
+        except Exception:
+            logger.exception("Redis checkpointer unavailable; using in-process saver (non-durable)")
+            if cp_cm is not None:
+                try:
+                    await cp_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                cp_cm = None
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+        briefing_graph.init(checkpointer)
+    try:
+        yield
+    finally:
+        if cp_cm is not None:
+            try:
+                await cp_cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+
+app = FastAPI(title="Vantage API", lifespan=lifespan)
 
 # Static chat UI — lifted from the Claude Design handoff (see Vantage-vault/04-Architecture.md
 # § "The UI"). Mocked routing in web/app.js will be replaced by real backend calls (auth-code
@@ -424,3 +479,78 @@ def create_skill(req: SaveSkillRequest, caller: Authed = Depends(authed)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "saved", "name": skill.name, "allowed_tools": skill.allowed_tools}
+
+
+# --- proactive admin briefing (ADR-008; LangGraph fan-out + HITL approval) ---------------
+
+
+class ApproveRequest(BaseModel):
+    approved_ids: list[int] = []  # draft_ids the admin approved; the rest are skipped
+
+
+def _require_admin(caller: Authed) -> None:
+    """403 unless the caller is an admin. Defence in depth — the briefing's MCP tools are
+    admin-only at the boundary too, so this just fails fast with a clear message."""
+    if "admin" not in caller.principal.roles:
+        raise HTTPException(status_code=403, detail="briefing is admin-only")
+
+
+@app.get("/briefing")
+async def briefing(caller: Authed = Depends(authed)):
+    """Run the proactive fleet briefing (admin only): rank high-risk accounts, compose the
+    escalation-summary skill across them, detect cross-customer patterns, and DRAFT next actions.
+    The run pauses at a human-in-the-loop gate (`pending_approval: true`); POST the approved
+    draft_ids to /briefing/{id}/approve to write them. RBAC stays enforced at every tool — this
+    endpoint only gates the entry point.
+    """
+    if not _BRIEFING_AVAILABLE:
+        raise HTTPException(status_code=503, detail="briefing unavailable (LangGraph not installed)")
+    _require_admin(caller)
+    briefing_id = oidc.gen_sid()
+    try:
+        return await briefing_graph.start_briefing(briefing_id, caller.principal, caller.token)
+    except Exception as exc:
+        logger.exception("briefing failed")
+        raise HTTPException(status_code=502, detail=f"briefing error: {exc}")
+
+
+@app.post("/briefing/{briefing_id}/approve")
+async def briefing_approve(briefing_id: str, req: ApproveRequest, caller: Authed = Depends(authed)):
+    """Approve drafted next actions from a paused briefing (admin only). Resumes the graph and
+    writes each approved draft via create_next_action with THIS admin's token — the approval IS
+    the authorisation, enforced at the MCP boundary. 404 if the briefing id is unknown/expired."""
+    if not _BRIEFING_AVAILABLE:
+        raise HTTPException(status_code=503, detail="briefing unavailable (LangGraph not installed)")
+    _require_admin(caller)
+    try:
+        result = await briefing_graph.approve_briefing(
+            briefing_id, caller.principal, caller.token, req.approved_ids)
+    except Exception as exc:
+        logger.exception("briefing approve failed")
+        raise HTTPException(status_code=502, detail=f"approve error: {exc}")
+    if result is None:
+        raise HTTPException(status_code=404, detail="briefing not found or expired")
+    return result
+
+
+@app.get("/briefing/stream")
+async def briefing_stream(caller: Authed = Depends(authed)):
+    """Streaming variant of GET /briefing (admin only): Server-Sent Events emitting a `step`
+    per graph node as it completes, then a `done` with the drafts — so the UI shows live
+    progress instead of a tens-of-seconds blank wait. Same graph + RBAC as /briefing; the
+    non-streaming /briefing stays for the eval harness + as a fallback."""
+    if not _BRIEFING_AVAILABLE:
+        raise HTTPException(status_code=503, detail="briefing unavailable (LangGraph not installed)")
+    _require_admin(caller)
+    briefing_id = oidc.gen_sid()
+
+    async def event_stream():
+        try:
+            async for evt in briefing_graph.stream_briefing(briefing_id, caller.principal, caller.token):
+                yield f"event: {evt['event']}\ndata: {_json.dumps(evt['data'], default=str)}\n\n"
+        except Exception:
+            logger.exception("briefing stream failed (briefing=%s)", briefing_id)
+            yield f"event: error\ndata: {_json.dumps({'detail': 'internal error — please try again'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
