@@ -18,6 +18,7 @@ updated: 2026-05-29
 - **[ADR-005](05-Decisions/ADR-005-seed-data.md)** — committed static seed, generated hybrid (Faker + Claude), shaped to the evals.
 - **[ADR-006](05-Decisions/ADR-006-memory-split.md)** — Redis for session/working memory; PostgreSQL as the system of record.
 - **[ADR-007](05-Decisions/ADR-007-environment-codespaces.md)** — dev/demo host is **GitHub Codespaces** (Docker-in-Docker) running the portable compose stack.
+- **[ADR-008](05-Decisions/ADR-008-langgraph-proactive-path.md)** — the proactive briefing is a **LangGraph** graph (hybrid): fleet fan-out + HITL approval + durable pause/resume, exactly where the simple loop strains. Reactive `/ask` keeps the loop.
 
 ## Component map (Docker Compose services)
 - **App / API** — entry point (FastAPI assumed); validates the Keycloak token, runs the agent loop.
@@ -32,8 +33,11 @@ updated: 2026-05-29
 ## The agent
 Minimal single-agent tool-calling loop (ADR-001): question → Claude selects tool(s) → tool runs (RBAC-checked) → result → repeat → answer. The model call sits behind a thin adapter for provider-agnosticism.
 
-## Tools (the nine)
-**Reads** (any authenticated role): `get_customer_profile` · `get_open_issues` · `summarise_issue_history`. **Writes** (RBAC-checked): `update_issue` (support+admin) · `create_next_action` · `update_next_action` (admin). **Browse** (read, any role; paginated + filterable, added in PR #21): `list_customers` · `list_issues` · `list_next_actions`. Standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
+## The proactive briefing (LangGraph — ADR-008)
+A *second* execution shape, for the one flow the loop strains on. The admin-only `GET /briefing` runs a **LangGraph graph**: `plan` (rank the high-risk fleet) → `summarise_one` (map — the escalation-summary skill fanned out per account via `Send`) → `detect` (cross-customer patterns) → `draft` (one next action per account, each tied to a real issue id) → `interrupt()` (human approval) → `route` (write the approved drafts on resume). It hits the ADR-001 revisit trigger squarely — **parallelism + HITL + durable pause/resume** — so the graph earns its place here while the loop keeps `/ask`. The graph is **just another MCP client**: same tools, same RBAC boundary; state is checkpointed in **Redis** so the approval resumes the paused run, and each write uses the *approving admin's* token (the approval is the authorisation). See [ADR-008](05-Decisions/ADR-008-langgraph-proactive-path.md).
+
+## Tools (the eleven)
+**Reads** (any authenticated role): `get_customer_profile` · `get_open_issues` · `summarise_issue_history`. **Writes** (RBAC-checked): `update_issue` (support+admin) · `create_next_action` · `update_next_action` (admin). **Browse** (read, any role; paginated + filterable, added in PR #21): `list_customers` · `list_issues` · `list_next_actions`. **Fleet aggregates** (admin-only; power the briefing — ADR-008): `get_high_risk_customers` · `detect_patterns`. Standalone, typed functions; each enforces RBAC (ADR-002) and uses parameterized SQL (no raw SQL exposed). Exposed via the MCP server (ADR-003).
 
 ## Skills (reusable, named capabilities)
 A **Skill** is a packaged, reusable capability — the Anthropic Agent-Skill pattern, embodied here as a small JSON file: `{name, description, instructions, parameters[], allowed_tools[]}`. Running a Skill *reuses the agent loop*: the skill's instructions become the system prompt and `allowed_tools` restricts the toolset — **least privilege on top of** the per-tool RBAC. A Skill is *just a prompt + a tool whitelist*, so even a user-authored skill can never exceed the caller's permissions (the dividend of keeping RBAC in the tools, not the prompt).
@@ -76,21 +80,28 @@ flowchart TD
     User(["User — sales / support / admin"])
 
     subgraph Stack["Docker Compose · private network (Codespace host, ADR-007)"]
-        API["API · FastAPI<br/>validates token, runs agent loop"]
+        API["API · FastAPI<br/>validates token, runs agent loop + briefing"]
         KC["Keycloak<br/>authentication + roles"]
         Loop["Agent loop<br/>Claude (model adapter)"]
-        MCP["MCP server · HTTP<br/>9 named tools · RBAC per tool"]
-        Redis[("Redis<br/>session memory · TTL")]
+        Brief["Briefing graph · LangGraph<br/>fan-out · patterns · HITL approval (ADR-008)"]
+        MCP["MCP server · HTTP<br/>11 named tools · RBAC per tool"]
+        Redis[("Redis Stack<br/>session memory + graph checkpoints")]
         PG[("PostgreSQL<br/>system of record")]
+        PX[("Phoenix<br/>OTel traces")]
     end
 
     User -->|"query + token"| API
     API -.->|"token validation"| KC
     API -->|"verified role + query"| Loop
+    API -->|"admin · GET /briefing"| Brief
     Loop <-->|"conversation context"| Redis
+    Brief <-->|"durable checkpoint · HITL"| Redis
     Loop -->|"tool call + role"| MCP
+    Brief -->|"same tools + RBAC"| MCP
     MCP -->|"allowed → parameterized SQL"| PG
     MCP -.->|"denied → message + log"| Loop
+    Loop -.->|"spans"| PX
+    Brief -.->|"spans"| PX
 ```
 
 *Flow: user sends query + Keycloak token → API validates it and gates the request → the agent (an MCP client) **forwards the token** to the MCP server → MCP **re-verifies it** and each tool checks the role, then runs parameterized SQL against Postgres (or returns a logged denial). Session context lives in Redis. Everything runs inside the host's private Docker network ([ADR-007](05-Decisions/ADR-007-environment-codespaces.md): GitHub Codespaces).*

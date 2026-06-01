@@ -149,9 +149,11 @@ Every `/ask` returns a `trace` of tool calls (input, result status, per-tool `ms
 On top of that, **OpenTelemetry tracing** exports spans to a self-hosted **Arize Phoenix** service (UI at `localhost:6006`) — OpenInference auto-instruments the OpenAI SDK (every model call in the loop *and* the briefing) and LangChain/LangGraph (the briefing graph's nodes, so the parallel fan-out and the approval gate are visible as a span tree). Nothing leaves the host; **LangSmith** is wired as an opt-in second backend that activates only when `LANGSMITH_API_KEY` is set (the stated bonus tracing — [ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)).
 
 ## Evaluation
-13 runnable cases proving tool-selection, grounding (E1/E2/E3), RBAC (allow + deny), multi-turn memory, the Skill, the browse tools, and auth — see [`07-Evals.md`](Vantage-vault/07-Evals.md). Run against the live stack:
+13 acceptance cases (tool-selection, grounding E1/E2/E3, RBAC allow+deny, multi-turn memory, the Skill, browse tools, auth), a 30-case adversarial **robustness** suite, and an 11-check **briefing** suite (admin-only RBAC, grounded drafts, the HITL approval gate, approve→write) — see [`07-Evals.md`](Vantage-vault/07-Evals.md). Run against the live stack:
 ```bash
-python eval/run_evals.py        # latest: 13/13 passed
+python eval/run_evals.py        # 13/13 — acceptance
+python eval/run_robustness.py   # 30/30 — adversarial / edge cases
+python eval/run_briefing.py     # 11/11 — the proactive briefing (ADR-008)
 ```
 
 ## Repo layout
