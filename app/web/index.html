@@ -156,6 +156,12 @@
       animation: brand-breathe 2.2s ease-in-out infinite;
     }
     @keyframes brand-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    /* Small inline variant — the chat's 'thinking' indicator (after you ask, before tokens). */
+    .brand-think-sm { width: 26px; height: 26px; }
+    .brand-think-sm::before { inset: -2px; border-radius: 9px;
+      -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+              mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px)); }
+    .brand-think-sm .brand-mark { width: 20px; height: 20px; border-radius: 7px; font-size: 11px; }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; }
@@ -448,8 +454,17 @@
                       </div>
                     </template>
 
+                    <!-- Thinking indicator — branded animated mark for the moment after you ask,
+                         before any token or tool (the "dead air"). -->
+                    <template x-if="msg.currentTool && msg.currentTool.tool === 'thinking'">
+                      <div class="mt-3 inline-flex items-center gap-2.5">
+                        <span class="brand-think brand-think-sm"><span class="brand-mark">V</span></span>
+                        <span class="text-[12.5px] text-textsoft">Thinking…</span>
+                      </div>
+                    </template>
+
                     <!-- Tool indicator (only while streaming, between tool calls) -->
-                    <template x-if="msg.currentTool">
+                    <template x-if="msg.currentTool && msg.currentTool.tool !== 'thinking'">
                       <div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-linesoft rounded-lg mono text-[11.5px] text-textsoft">
                         <span class="w-2.5 h-2.5 rounded-full border-[1.5px] border-line spin" style="border-top-color: var(--accent);"></span>
                         <span class="text-textmuted">→ calling</span>
