@@ -124,6 +124,13 @@ window.vantage = function () {
     skillDraft: { name: "", description: "", instructions: "", parameters: [], allowed_tools: [] },
     showUserMenu: false,
 
+    // briefing (admin-only proactive fleet briefing — ADR-008)
+    showBriefing: false,
+    briefingLoading: false,
+    briefingApproving: false,
+    briefing: null,        // { briefing_id, coverage, patterns, summaries, drafts }
+    briefingResults: null, // set after approve: the written next actions
+
     // toast
     toast: "",
 
@@ -800,6 +807,77 @@ window.vantage = function () {
     },
     slugify(s) {
       return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    },
+
+    // ─── briefing — admin-only proactive fleet briefing (ADR-008) ───
+    // Runs GET /briefing (the LangGraph graph) to the human-in-the-loop gate, shows the
+    // drafted next actions, then POSTs the approved draft_ids to write them. The endpoints
+    // are admin-only at the boundary too; this just gates the entry + drives the modal.
+    async openBriefing() {
+      if (this.role !== "admin") { this.flash("The briefing is admin-only."); return; }
+      this.showBriefing = true;
+      this.briefing = null;
+      this.briefingResults = null;
+      await this.runBriefing();
+    },
+    async runBriefing() {
+      this.briefingLoading = true;
+      this.briefingResults = null;
+      try {
+        const r = await fetch("/briefing", { credentials: "include" });
+        if (r.status === 403) { this.flash("The briefing is admin-only."); this.showBriefing = false; return; }
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `${r.status}`);
+          this.flash(`Briefing failed (${r.status}): ${detail.slice(0, 140)}`);
+          this.showBriefing = false;
+          return;
+        }
+        const data = await r.json();
+        // Default every draft to selected — the admin reviews and unchecks, rather than re-checks.
+        (data.drafts || []).forEach((d) => { d._selected = true; });
+        this.briefing = data;
+      } catch (e) {
+        this.flash(`Network error running briefing: ${e.message || e}`);
+        this.showBriefing = false;
+      } finally {
+        this.briefingLoading = false;
+      }
+    },
+    briefingSelected() {
+      return (this.briefing?.drafts || []).filter((d) => d._selected);
+    },
+    async approveBriefing() {
+      const b = this.briefing;
+      if (!b || !b.briefing_id) return;
+      const ids = this.briefingSelected().map((d) => d.draft_id);
+      if (!ids.length) { this.flash("Select at least one next action to approve."); return; }
+      this.briefingApproving = true;
+      try {
+        const r = await fetch(`/briefing/${encodeURIComponent(b.briefing_id)}/approve`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved_ids: ids }),
+        });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `${r.status}`);
+          this.flash(`Approve failed (${r.status}): ${detail.slice(0, 140)}`);
+          return;
+        }
+        const data = await r.json();
+        this.briefingResults = data.results || [];
+        const created = this.briefingResults.filter((x) => x.status === "created").length;
+        this.flash(`${created} next action${created === 1 ? "" : "s"} created.`);
+      } catch (e) {
+        this.flash(`Network error approving: ${e.message || e}`);
+      } finally {
+        this.briefingApproving = false;
+      }
+    },
+    briefingCreatedCount() {
+      return (this.briefingResults || []).filter((r) => r.status === "created").length;
+    },
+    briefingSkippedCount() {
+      return (this.briefingResults || []).filter((r) => r.status === "skipped").length;
     },
 
     // toast

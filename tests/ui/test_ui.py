@@ -851,3 +851,39 @@ class TestCopy:
         assert html, "renderMd is not reachable as a page global"
         assert "code-wrap" in html and "copy-code" in html, \
             f"code block was not wrapped with a copy affordance: {html[:200]}"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 16) BRIEFING — admin-only proactive fleet briefing (ADR-008)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestBriefing:
+    """The admin-only proactive briefing UI: gating, the modal, the run, and approve.
+    The endpoints themselves are validated by eval/run_briefing.py — these prove the UI
+    wiring (admin-only entry, the modal, the GET /briefing + POST approve calls)."""
+
+    def test_briefing_button_hidden_for_sales(self, page_sales: Page):
+        assert page_sales.locator("button:has-text('Briefing')").count() == 0
+
+    def test_briefing_button_hidden_for_support(self, page_support: Page):
+        assert page_support.locator("button:has-text('Briefing')").count() == 0
+
+    def test_briefing_button_visible_for_admin(self, page_admin: Page):
+        expect(page_admin.locator("button:has-text('Briefing')")).to_be_visible(timeout=10_000)
+
+    def test_briefing_opens_modal_and_shows_loading(self, page_admin: Page):
+        page_admin.locator("button:has-text('Briefing')").click()
+        expect(page_admin.get_by_text("Fleet briefing")).to_be_visible(timeout=5_000)
+        expect(page_admin.get_by_text(re.compile("running the briefing", re.I))).to_be_visible(timeout=8_000)
+
+    def test_briefing_runs_drafts_then_approves(self, page_admin: Page):
+        page_admin.locator("button:has-text('Briefing')").click()
+        expect(page_admin.get_by_text("Fleet briefing")).to_be_visible(timeout=5_000)
+        # The graph ranks the fleet, fans the skill out per account, detects patterns, and
+        # drafts actions — an LLM-driven multi-step run, so give it room.
+        approve = page_admin.locator("button:has-text('Approve')")
+        expect(approve).to_be_visible(timeout=150_000)
+        expect(page_admin.get_by_text("Drafted next actions")).to_be_visible()
+        # Drafts default to selected; approving writes them via create_next_action.
+        approve.click()
+        expect(page_admin.get_by_text(re.compile(r"next action.*written", re.I))).to_be_visible(timeout=45_000)
