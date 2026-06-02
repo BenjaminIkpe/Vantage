@@ -1,8 +1,8 @@
 # Vantage
 
-A grounded, **agentic** enterprise assistant for **Acme Operations** (a fictional B2B payments platform) — an internal copilot for sales, support, and operations staff that **retrieves, summarises, and recommends next actions** across customers and their support issues, **securely and auditably**. Built for the EY Applied AI Engineer technical assessment.
+**A grounded, *agentic* AI copilot for enterprise support and account teams.** It lets sales, support, and operations staff at the fictional **Acme Operations** (a B2B payments platform) ask in plain English — and it **retrieves, summarises, and recommends next actions** across customers and their support issues, **securely and auditably**. Built for the EY Applied AI Engineer technical assessment.
 
-The agent reasons over a small set of **named, RBAC-checked tools** exposed by a **custom MCP server**, never raw SQL. Permissions are enforced in the tools (not the prompt), so even a fully prompt-injected agent can't exceed the caller's role. Answers are always grounded in the database — a missing customer is reported as "not found," near-identical names are disambiguated, never invented.
+The agent reasons over a small set of **named, RBAC-checked tools** exposed by a **custom MCP server** (Model Context Protocol), never raw SQL. Permissions are enforced in the tools (not the prompt), so even a fully prompt-injected agent can't exceed the caller's role. Answers are always grounded in the database — a missing customer is reported as "not found," near-identical names are disambiguated, never invented.
 
 > Design rationale, ADRs, threat model, and the build log live in [`Vantage-vault/`](Vantage-vault/) — start at [`00-NOW.md`](Vantage-vault/00-NOW.md).
 
@@ -108,7 +108,13 @@ Reusable, named capabilities (the Anthropic *Agent Skill* pattern, packaged here
 ## Proactive briefing (LangGraph + human-in-the-loop)
 The reactive loop answers what a user asks. The **proactive briefing** (`GET /briefing`, admin-only) is the counterpart: one call ranks the high-risk fleet, **composes the escalation-summary skill across every flagged account in parallel**, detects **cross-customer patterns** no per-account view can see, and **drafts a next action per account** — then **pauses for human approval** before anything is written.
 
-This is the one place a simple loop genuinely strains — parallel fan-out, a human-in-the-loop gate, durable pause/resume — so it's built as a **LangGraph graph**, while `/ask` keeps the minimal loop. The decision (and why *not* a rewrite) is [ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md). The graph calls the **same MCP tools across the same RBAC boundary**; the run pauses at an `interrupt()` and resumes on `POST /briefing/{id}/approve`, writing each approved draft via `create_next_action` **with the approving admin's token** — so the approval *is* the authorisation. State is checkpointed in **Redis** (durable across the pause; the API stays free of the system-of-record, [ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)). The whole feature sits behind a guarded import — if LangGraph were absent, `/ask` and the UI are entirely unaffected. In the UI it's an admin-only modal that **streams the graph's progress live** (a checklist that lights up node-by-node under an animated brand mark), so the tens-of-seconds run shows real work rather than a blank spinner.
+This is the one place a simple loop genuinely strains — parallel fan-out, a human-in-the-loop gate, durable pause/resume — so it's built as a **LangGraph graph** while `/ask` keeps the minimal loop ([ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md) covers the decision, and why *not* a rewrite). How it works:
+
+- **Same boundary** — the graph is just another MCP client: it calls the **same tools across the same RBAC boundary** as the loop.
+- **Approval *is* the authorisation** — the run pauses at an `interrupt()` and resumes on `POST /briefing/{id}/approve`, writing each approved draft via `create_next_action` **with the approving admin's token**.
+- **Durable** — state is checkpointed in **Redis**, so the pause survives an API restart (and the API stays free of the system-of-record, [ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)).
+- **Isolated** — the whole feature sits behind a guarded import: if LangGraph were absent, `/ask` and the UI are entirely unaffected.
+- **Live in the UI** — an admin-only modal **streams the graph's progress node-by-node** (a checklist under an animated brand mark), so a tens-of-seconds run shows real work, not a blank spinner.
 
 ```bash
 # as admin (Dana): run the briefing, then approve selected drafts
@@ -119,11 +125,20 @@ curl -s -X POST localhost:8000/briefing/$ID/approve -H "Authorization: Bearer $T
 
 ## Chat UI
 
-Single-page chat (Alpine.js + Tailwind Play CDN + markdown-it + DOMPurify, no build step) served by FastAPI at `/`. Streaming SSE token-by-token via `/ask/stream`; per-message **show thinking** panel interleaves the model's pre-tool reasoning with each tool-call pill + per-tool latency; sidebar of past chats (one per OIDC user, Redis-backed); Skills menu; **save as skill** authoring affordance; dark/light themes; full keyboard support (`⌘N` new chat, `⌘K` skills, Enter to send). Each completed answer carries a visible **Sources** footer (the tools + data it drew on) and **role-aware follow-up chips**; **Stop** truly aborts an in-flight response (not just hides the spinner); new chats get a concise **LLM-generated title**; answers and code blocks have **copy** buttons.
+Single-page chat — **Alpine.js + Tailwind (Play CDN) + markdown-it + DOMPurify, no build step** — served by FastAPI at `/`. Features:
+
+- **Live streaming** — SSE token-by-token via `/ask/stream`.
+- **Show thinking** — a per-message panel interleaving the model's pre-tool reasoning with each tool-call pill + per-tool latency.
+- **Sources footer** — every answer shows the tools + data it drew on.
+- **Role-aware follow-up chips** — suggested next questions, scoped to your role.
+- **Real Stop** — genuinely aborts an in-flight response, not just hides the spinner.
+- **Chat history sidebar** — past chats per signed-in user (Redis-backed); new chats get a concise **LLM-generated title**.
+- **Skills menu + save-as-skill** — run a Skill, or turn a finished session into one.
+- **Polish** — **copy** buttons on answers and code blocks, **dark/light** themes, full keyboard support (`⌘N` new chat, `⌘K` skills, Enter to send).
 
 ## Hit the API directly (without the UI)
 
-Useful for scripting, evals, or sanity-checking the agent loop. The dev-only ROPC password grant gets you a JWT:
+Useful for scripting, evals, or sanity-checking the agent loop. The dev-only **ROPC** (resource-owner password) grant gets you a JWT:
 
 ```bash
 TOKEN=$(curl -s http://localhost:8080/realms/vantage/protocol/openid-connect/token \
@@ -135,7 +150,7 @@ curl -s -X POST http://localhost:8000/ask -H "Authorization: Bearer $TOKEN" \
   -d '{"query":"Show open issues for Velocity Marketplace, summarise the most urgent, and suggest a next action."}'
 ```
 
-The browser flow uses real **OIDC Auth-Code + PKCE + BFF cookie** (the access token never reaches the browser); the password grant above is dev-only.
+The browser flow uses a real **OIDC** (OpenID Connect) **Authorization-Code + PKCE** login with a **BFF** (backend-for-frontend) cookie session — the access token never reaches the browser; the password grant above is dev-only.
 
 ### Endpoints
 - `POST /ask` `{query, session_id?}` — non-streaming; returns `{answer, trace, elapsed_ms, session_id}`. Used by the eval harness for deterministic assertions.
