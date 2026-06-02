@@ -73,6 +73,16 @@ flowchart TD
 - **Proactive briefing** = an admin-only **LangGraph** graph ([ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)) — the hybrid's *second* execution shape: fleet fan-out → cross-customer patterns → AI-drafted next actions → **human-in-the-loop approval** (durable pause/resume on a Redis checkpointer). The simple loop still serves reactive `/ask`; the graph is used only where its triggers (parallelism + HITL + durable runs) actually fire.
 - **Tracing** = OpenTelemetry → self-hosted **Phoenix** (no egress) for both the loop and the graph; **LangSmith** opt-in via a key.
 
+## Key trade-offs
+Each load-bearing decision and the alternative it beat — full reasoning in the [ADRs](Vantage-vault/05-Decisions/).
+
+- **A hand-written tool-calling loop, not a framework** ([ADR-001](Vantage-vault/05-Decisions/ADR-001-agent-framework.md)). LangChain/LangGraph are over-spec for a ≤5-step request→response flow and add an abstraction tax on the trace/debug story — so the reactive agent is one readable module where *the trace is the debugger*. Cost: we hand-write the loop + session handling (small, isolated, swappable).
+- **RBAC in the tools, never in the prompt** ([ADR-002](Vantage-vault/05-Decisions/ADR-002-rbac-tool-boundary.md)). The LLM isn't a trust boundary; each tool checks the verified role at the MCP boundary, so a prompt injection that makes the model *call* an admin tool still hits a hard refusal. Cost: thread the verified role through every call.
+- **A custom MCP server with named, typed tools — not a generic SQL MCP** ([ADR-003](Vantage-vault/05-Decisions/ADR-003-mcp-server.md)). Exposing raw SQL to the model is an injection surface with no per-tool RBAC (the reference Postgres MCP was deprecated for exactly that). Cost: one network hop + a second container — buying a second trust boundary and zero SQL exposure.
+- **Redis for session memory, Postgres as the system of record** ([ADR-006](Vantage-vault/05-Decisions/ADR-006-memory-split.md)). Split on "could I delete this and still be correct?" — working/conversation state in Redis (TTL'd), business data in Postgres. Payoff: a Redis wipe loses only in-flight context, never records.
+- **GitHub Codespaces as the dev/demo host, not a cloud VM** ([ADR-007](Vantage-vault/05-Decisions/ADR-007-environment-codespaces.md), superseding an SKU-locked Azure VM). The Compose stack stays portable, so the production target stays open. Cost: the 90-minute idle sleep (mitigated for the demo).
+- **Hybrid execution — a LangGraph graph for the proactive briefing only** ([ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)). Where the loop genuinely strains — parallel fan-out + human-in-the-loop + durable pause/resume — a graph earns its place; `/ask` keeps the minimal loop. Right-sizing each path, not framework-avoidance.
+
 ## The eleven tools
 Six point-lookup / write tools, three browse/list tools (PR #21), plus two admin-only fleet aggregates that power the proactive briefing ([ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)).
 | Tool | Does | Roles |
