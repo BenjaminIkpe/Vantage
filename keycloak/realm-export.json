@@ -1,6 +1,9 @@
 {
   "realm": "vantage",
   "enabled": true,
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 36000,
+  "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
       {
