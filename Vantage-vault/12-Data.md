@@ -78,4 +78,4 @@ The KYC issue is the showpiece — five chronological updates over ~90 days, eac
 Validated against a throwaway Postgres before merge; a negative-control test confirms the suite actually fails when a scenario is broken.
 
 ## Bottom line
-> The seed is small (40 issues) but *purpose-built*: every scenario the brief asks the assistant to handle has a specific customer staging it, and the data-ci suite holds the line so the scenarios don't silently degrade. Schema + ADR explain the *design*; this doc explains the *contents*.
+> The seed is small (40 issues) but *purpose-built*: every scenario the assistant must handle has a specific customer staging it, and the data-ci suite holds the line so the scenarios don't silently degrade. Schema + ADR explain the *design*; this doc explains the *contents*.

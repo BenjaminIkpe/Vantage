@@ -1,6 +1,6 @@
 # Vantage — Claude context
 
-Vantage is a grounded, **agentic** enterprise assistant for the fictional client **Acme Operations** (a B2B payments platform), built for the EY Applied AI Engineer take-home. This file bootstraps a fresh session — read the cursor first.
+Vantage is a grounded, **agentic** enterprise assistant for the fictional client **Acme Operations** (a B2B payments platform). This file bootstraps a fresh session — read the cursor first.
 
 ## Read first
 1. **[`Vantage-vault/00-NOW.md`](Vantage-vault/00-NOW.md)** — the cursor: current status, what's proven, decisions, and the **next moves**. Always start here.

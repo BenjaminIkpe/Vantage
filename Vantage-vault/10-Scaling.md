@@ -8,7 +8,7 @@ updated: 2026-05-28
 # Scaling — does this still work at thousands of customers, or do we need RAG?
 
 > [!NOTE] Purpose
-> Panel-grade answer to *"what happens to Vantage when Acme has thousands of clients and a huge DB?"* — what scales as-is, what we'd change (same-paradigm), and **where RAG belongs (and where it doesn't)**. Cross-refs: [ADR-001](05-Decisions/ADR-001-agent-framework.md), [ADR-003](05-Decisions/ADR-003-mcp-server.md), [ADR-006](05-Decisions/ADR-006-memory-split.md), [03-Scope](03-Scope.md).
+> A considered answer to *"what happens to Vantage when Acme has thousands of clients and a huge DB?"* — what scales as-is, what we'd change (same-paradigm), and **where RAG belongs (and where it doesn't)**. Cross-refs: [ADR-001](05-Decisions/ADR-001-agent-framework.md), [ADR-003](05-Decisions/ADR-003-mcp-server.md), [ADR-006](05-Decisions/ADR-006-memory-split.md), [03-Scope](03-Scope.md).
 
 ## Short answer
 **Yes, it still works** at thousands of customers / a huge DB — and **no, RAG isn't the upgrade path for what we have**. RAG belongs **alongside** the existing tools, not in place of them.
@@ -49,7 +49,7 @@ The scaling risk that *isn't* about data volume is **the agent side: tool select
 - **Dynamic tool discovery / filtering** (filter to relevant tools per query — *retrieval over tools*).
 - **Specialised agents** with smaller, focused toolsets.
 
-MCP's `list_tools` makes this easier (we already discover dynamically). At 11 tools we're nowhere near it — but it's the next thing to flag in the panel.
+MCP's `list_tools` makes this easier (we already discover dynamically). At 11 tools we're nowhere near it — but it's the next architectural inflection point.
 
 ## Bottom line
 > The system scales to thousands of customers without changing the agent contract, because tool-based retrieval bounds context to a query-scoped slice — the database can grow; the prompt's shape doesn't. RAG isn't the upgrade path *for what we have*; it's an **additional capability** added as one more MCP tool (likely pgvector in-place) when retrieval becomes semantic over unstructured text. The genuine scaling worry isn't the DB — it's tool selection if the tool surface gets large, which has its own well-known patterns.

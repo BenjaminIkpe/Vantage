@@ -8,9 +8,9 @@ updated: 2026-05-29
 # Evals
 
 > [!NOTE] Purpose
-> The runnable test set that proves the assistant works — a required deliverable. Derived from the acceptance criteria in [02-User-Stories](02-User-Stories.md). Harness: [`eval/run_evals.py`](../eval/run_evals.py).
+> The runnable test set that proves the assistant works. Derived from the acceptance criteria in [02-User-Stories](02-User-Stories.md). Harness: [`eval/run_evals.py`](../eval/run_evals.py).
 
-## What each case measures (from the brief)
+## What each case measures
 - Correct **tool(s)** selected for the query
 - Response **grounded** in database results (not invented)
 - **RBAC** respected (right role allowed / denied)
@@ -46,10 +46,10 @@ Uses the dev ROPC grant for the three persona logins (`priya.nair` / `priya` for
 **Latest run: 13 / 13 passed** (Codespace, against the committed seed).
 
 > [!TIP] Includes the negative case
-> Case 6 (a `sales_user` trying to update an issue) is the brief's required **denied** case — it proves the *tool* enforces RBAC on the re-verified role, not the prompt: the agent attempts the tool and relays the refusal.
+> Case 6 (a `sales_user` trying to update an issue) is the required **denied** case — it proves the *tool* enforces RBAC on the re-verified role, not the prompt: the agent attempts the tool and relays the refusal.
 
 ## Robustness suite — adversarial / edge-case coverage
-The acceptance suite above proves the happy paths. A separate **robustness** suite — [`eval/run_robustness.py`](../eval/run_robustness.py) — probes the messier ground an interviewer might prod, with 30 cases across 6 categories:
+The acceptance suite above proves the happy paths. A separate **robustness** suite — [`eval/run_robustness.py`](../eval/run_robustness.py) — probes the messier ground real users and adversaries hit, with 30 cases across 6 categories:
 
 | Category | Cases | Probes |
 |---|---|---|

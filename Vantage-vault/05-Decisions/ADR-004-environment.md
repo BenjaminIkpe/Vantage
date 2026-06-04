@@ -16,23 +16,23 @@ supersedes:
 **Date:** 2026-05-27
 
 ## Context
-The brief requires the stack to run via `docker compose up`, plus a live end-to-end demo on the day. Local Docker isn't viable (laptop disk constraint). Builder has Azure credits and dislikes Codespaces' auto-suspend.
+The stack must run via `docker compose up`, with a live end-to-end demo. Local Docker isn't viable (laptop disk constraint). Builder has Azure credits and dislikes Codespaces' auto-suspend.
 
 ## Decision
 Run on **a single Azure Linux VM with Docker + Docker Compose** — the VM is just the Docker *host*. **Keep the compose stack fully portable:** no Azure-native services, no Azure-specific config; anyone can clone the repo and `docker compose up` on any Docker host.
 
 - VM ~8 GB (e.g. B2ms); **deallocate when idle** to conserve credits.
 - Dev via VS Code Remote-SSH into the VM.
-- Demo day: VM stays running (no auto-suspend), connect from laptop and demo; keep a screen-recording fallback.
+- For the demo: the VM stays running (no auto-suspend), connect from laptop and demo; keep a screen-recording fallback.
 
 ## Alternatives considered
 - **Local Docker Desktop.** Rejected — laptop disk constraint.
 - **GitHub Codespaces.** Free and viable, but auto-suspends/restarts the terminal (builder preference against); Azure credits available anyway.
-- **Azure-native (Container Apps / AKS).** Rejected — re-architects away from `docker compose up`, more complexity, and couples the deliverable to Azure.
+- **Azure-native (Container Apps / AKS).** Rejected — re-architects away from `docker compose up`, more complexity, and couples the system to Azure.
 
 ## Consequences
 - ✅ Satisfies `docker compose up` and the live-demo requirement; no local disk needed.
-- ✅ Portable stack → an assessor can run it anywhere; not Azure-locked. Strong panel line.
-- ✅ Always-on host → no cold-start surprise on demo day.
-- ⚠️ Internet dependency on demo day + must remember to deallocate the VM (cost). Mitigations: rehearse the demo path; screen-recording fallback.
+- ✅ Portable stack → anyone can run it anywhere; not Azure-locked. Strong design point.
+- ✅ Always-on host → no cold-start surprise during the demo.
+- ⚠️ Internet dependency during the demo + must remember to deallocate the VM (cost). Mitigations: rehearse the flow; screen-recording fallback.
 - ⚠️ Dev happens on the VM (Remote-SSH) — a small workflow shift, sorted at setup (Slice 0).

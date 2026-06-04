@@ -18,7 +18,7 @@ updated: 2026-05-27
 These split into two jobs: **reactive support** (work the issue queue) and **proactive account management** (watch account health and risk). Vantage serves both.
 
 ## What Acme does (business context)
-*(The brief leaves Acme's business open; we define it concretely so the data, demo, and risk model are coherent — see [ADR-005](05-Decisions/ADR-005-seed-data.md).)*
+*(Acme's business domain is left open; we define it concretely so the data, demo, and risk model are coherent — see [ADR-005](05-Decisions/ADR-005-seed-data.md).)*
 
 **Acme is a B2B payments & billing platform** ("Stripe-for-SMBs"): payment processing, payouts, and billing infrastructure delivered to online businesses via an API + dashboard.
 
@@ -36,7 +36,7 @@ These split into two jobs: **reactive support** (work the issue queue) and **pro
 - [x] Holds context across a multi-turn session (Redis).
 - [x] RBAC demonstrably enforced — including at least one *denied* case.
 - [x] Eval set (5–10 questions) passes, with documented results (13/13 — [07-Evals](07-Evals.md)).
-- [x] Every design choice defensible in the panel (logged as ADRs).
+- [x] Every design choice documented with rationale (logged as ADRs).
 
 ## Primary users
 Roles: `sales_user`, `support_user`, `admin`. Full detail in [02-User-Stories](02-User-Stories.md).
