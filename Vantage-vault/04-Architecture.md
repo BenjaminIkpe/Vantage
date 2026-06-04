@@ -105,3 +105,35 @@ flowchart TD
 ```
 
 *Flow: user sends query + Keycloak token → API validates it and gates the request → the agent (an MCP client) **forwards the token** to the MCP server → MCP **re-verifies it** and each tool checks the role, then runs parameterized SQL against Postgres (or returns a logged denial). Session context lives in Redis. Everything runs inside the host's private Docker network ([ADR-007](05-Decisions/ADR-007-environment-codespaces.md): GitHub Codespaces).*
+
+## The proactive briefing graph (LangGraph · ADR-008)
+
+The second execution shape. `GET /briefing` runs this `StateGraph`; nodes call the *same* MCP tools + skill (RBAC unchanged). The map fan-out is `Send`; the HITL pause is `interrupt()` with the run **checkpointed to Redis**, so `POST /briefing/{id}/approve` resumes it — possibly minutes later, across an API restart. Source: `app/briefing_graph.py`.
+
+```mermaid
+flowchart TD
+    START([START]) --> plan["<b>plan</b><br/>get_high_risk_customers<br/>(admin-only MCP tool)"]
+
+    plan -->|"fan_out: one Send per customer (map, parallel)"| S1["<b>summarise_one</b> · acct 1<br/>escalation-summary skill<br/>+ get_open_issues"]
+    plan --> S2["<b>summarise_one</b> · acct 2"]
+    plan --> SN["<b>summarise_one</b> · acct N"]
+    plan -.->|"no high-risk accounts → skip"| detect
+
+    S1 --> detect["<b>detect</b> (fan-in, runs once)<br/>detect_patterns<br/>(admin-only MCP tool)"]
+    S2 --> detect
+    SN --> detect
+
+    detect --> draft["<b>draft</b><br/>1 LLM call → next actions<br/>each tied to a REAL open issue_id"]
+    draft --> approval{{"<b>approval</b> · interrupt()<br/>PAUSE — hand drafts to admin<br/>state checkpointed to Redis"}}
+    approval -->|"resume: admin-approved draft_ids<br/>(approver's token)"| route["<b>route</b><br/>create_next_action per approved draft<br/>RBAC authorises as that admin"]
+    route --> E([END])
+
+    classDef tool fill:#e8f0fe,stroke:#4285f4;
+    classDef llm fill:#fef7e0,stroke:#f9ab00;
+    classDef gate fill:#fce8e6,stroke:#ea4335;
+    class plan,S1,S2,SN,detect,route tool;
+    class draft llm;
+    class approval gate;
+```
+
+*Reducer note: each parallel `summarise_one` appends to the `summaries` list (`Annotated[list, operator.add]`); the edge into `detect` waits for **all** map tasks (fan-in). Only `route`'s `create_next_action` writes — and only for approved drafts, authorised by the approving admin's token at the MCP boundary.*
