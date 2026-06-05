@@ -1,6 +1,5 @@
 """Observability tracing — OpenTelemetry -> Arize Phoenix (self-hosted, no egress), with
-LangSmith wired as an opt-in second backend. This is the brief's bonus tracing (03-Scope
-Could; ADR-008).
+LangSmith wired as an opt-in second backend. An optional second observability backend (03-Scope; ADR-008).
 
 Both execution shapes are traced from one place: OpenInference auto-instruments the OpenAI
 SDK (every model call in app/llm.py — so the reactive loop *and* the briefing's draft/skill
