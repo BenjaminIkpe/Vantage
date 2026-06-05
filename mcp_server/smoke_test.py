@@ -78,7 +78,7 @@ async def read_checks(token: str):
 
 
 async def write_matrix():
-    """The brief's RBAC matrix at the tool boundary — deterministic, no LLM."""
+    """The RBAC matrix at the tool boundary — deterministic, no LLM."""
     # Persona logins (renamed from sales/support/admin-user to match the seed personas
     # in Vantage-vault/02-User-Stories.md). Passwords are the first name for demo
     # discoverability.

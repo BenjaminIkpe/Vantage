@@ -1,7 +1,7 @@
 """Vantage ROBUSTNESS suite — adversarial / edge-case coverage beyond the headline evals.
 
 The acceptance suite (`eval/run_evals.py`) proves the happy paths and the core RBAC story.
-This suite probes the messy ground an interviewer might prod: misspellings, all-caps,
+This suite probes the messy ground real users and adversaries hit: misspellings, all-caps,
 whitespace, prompt-injection attempts, out-of-scope questions, garbage inputs, multi-turn
 weirdness, and Skill-runner edges. Stable assertions: target deterministic signals (which
 tools ran, what status they returned, HTTP status, forbidden writes) — substring checks on
