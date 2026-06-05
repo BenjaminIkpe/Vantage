@@ -1,6 +1,6 @@
 # Vantage
 
-**A grounded, *agentic* AI copilot for enterprise support and account teams.** It lets sales, support, and operations staff at the fictional **Acme Operations** (a B2B payments platform) ask in plain English — and it **retrieves, summarises, and recommends next actions** across customers and their support issues, **securely and auditably**. Built for the EY Applied AI Engineer technical assessment.
+**A grounded, *agentic* AI copilot for enterprise support and account teams.** It lets sales, support, and operations staff at the fictional **Acme Operations** (a B2B payments platform) ask in plain English — and it **retrieves, summarises, and recommends next actions** across customers and their support issues, **securely and auditably**.
 
 The agent reasons over a small set of **named, RBAC-checked tools** exposed by a **custom MCP server** (Model Context Protocol), never raw SQL. Permissions are enforced in the tools (not the prompt), so even a fully prompt-injected agent can't exceed the caller's role. Answers are always grounded in the database — a missing customer is reported as "not found," near-identical names are disambiguated, never invented.
 
@@ -172,7 +172,7 @@ JWT fully verified (signature/issuer/expiry, `alg` pinned); RBAC at the tool bou
 ## Observability
 Every `/ask` returns a `trace` of tool calls (input, result status, per-tool `ms`) + total `elapsed_ms`; write attempts emit a server-side **audit log** line (`user / roles / target / decision`); tool/agent errors surface as a `502` on `/ask` or a streamed `error` event on `/ask/stream`, with a **generic** message — internals are logged server-side, never returned to the client.
 
-On top of that, **OpenTelemetry tracing** exports spans to a self-hosted **Arize Phoenix** service (UI at `localhost:6006`) — OpenInference auto-instruments the OpenAI SDK (every model call in the loop *and* the briefing) and LangChain/LangGraph (the briefing graph's nodes, so the parallel fan-out and the approval gate are visible as a span tree). Nothing leaves the host; **LangSmith** is wired as an opt-in second backend that activates only when `LANGSMITH_API_KEY` is set (the stated bonus tracing — [ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)).
+On top of that, **OpenTelemetry tracing** exports spans to a self-hosted **Arize Phoenix** service (UI at `localhost:6006`) — OpenInference auto-instruments the OpenAI SDK (every model call in the loop *and* the briefing) and LangChain/LangGraph (the briefing graph's nodes, so the parallel fan-out and the approval gate are visible as a span tree). Nothing leaves the host; **LangSmith** is wired as an opt-in second backend that activates only when `LANGSMITH_API_KEY` is set (optional; [ADR-008](Vantage-vault/05-Decisions/ADR-008-langgraph-proactive-path.md)).
 
 ## Evaluation
 13 acceptance cases (tool-selection, grounding E1/E2/E3, RBAC allow+deny, multi-turn memory, the Skill, browse tools, auth), a 30-case adversarial **robustness** suite, and an 11-check **briefing** suite (admin-only RBAC, grounded drafts, the HITL approval gate, approve→write) — see [`07-Evals.md`](Vantage-vault/07-Evals.md). Run against the live stack:

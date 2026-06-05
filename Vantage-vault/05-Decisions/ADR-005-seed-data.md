@@ -13,7 +13,7 @@ supersedes:
 **Date:** 2026-05-27
 
 ## Context
-The brief requires the database seeded with representative data sufficient to demonstrate all capabilities, plus an eval set that needs stable ground truth. Data must fit our 5-table schema, exercise all 11 tools + the Escalation Summary Skill, and plant specific eval scenarios.
+We need the database seeded with representative data sufficient to exercise all capabilities, plus an eval set with stable ground truth. Data must fit our 5-table schema, exercise all 11 tools + the Escalation Summary Skill, and plant specific eval scenarios.
 
 ## Decision
 **Generate a hybrid synthetic dataset once, review it, and commit it as a static seed file** (SQL/JSON) in the repo; the DB loads it on `docker compose up`.
@@ -26,10 +26,10 @@ The brief requires the database seeded with representative data sufficient to de
 ## Alternatives considered
 - **Pure LLM-generated dataset.** Rejected — LLMs don't preserve referential integrity across tables and can invent unrealistic values. Used only for text, inside a Faker-owned structure.
 - **Public dataset (Kaggle/HuggingFace).** Rejected as the basis — won't fit our schema/roles, licensed non-commercial, can't be shaped to the eval cases. May *borrow* realistic ticket categories for believability.
-- **Generate fresh at runtime.** Rejected — non-deterministic, slow, adds an LLM dependency to startup. A static committed seed is reproducible and identical for assessors.
+- **Generate fresh at runtime.** Rejected — non-deterministic, slow, adds an LLM dependency to startup. A static committed seed is reproducible and identical across environments.
 
 ## Consequences
-- ✅ Reproducible + identical data for demo, evals, and assessors; no runtime LLM dependency.
+- ✅ Reproducible + identical data for the demo, evals, and any environment; no runtime LLM dependency.
 - ✅ Realistic enough for the agent to summarise/reason; integrity guaranteed by code.
 - ✅ Eval ground truth is baked in and hand-tuned.
 - ⚠️ The generation script is a one-time dev tool; if the schema changes, regenerate + re-commit the seed.

@@ -16,11 +16,11 @@ supersedes:
 > This ADR governs the **reactive `/ask` loop** and still stands for it. But the **proactive briefing** needs exactly what the revisit trigger named — parallel fan-out + human-in-the-loop + durable pause/resume — so that one path is built as a **LangGraph** graph: see [ADR-008](ADR-008-langgraph-proactive-path.md). The result is a deliberate **hybrid** (loop for reactive, graph where its triggers fire), not a reversal of this decision.
 
 ## Context
-We're building Vantage, an agentic assistant. The brief (§4.1) requires the agent to **select tools dynamically** based on the query — "prompt-only solutions that bypass tool use will not satisfy." So it must be the *agent* pattern (LLM-driven tool selection), not a hard-coded workflow.
+We're building Vantage, an agentic assistant. A core requirement is that the agent **select tools dynamically** based on the query — prompt-only solutions that bypass tool use don't qualify. So it must be the *agent* pattern (LLM-driven tool selection), not a hard-coded workflow.
 
 The flow is simple: **ask → LLM picks tool(s) → tool runs (with an RBAC check) → answer.** Five flat tools, no inter-tool dependencies, no parallelism, no human-in-the-loop (HITL), no long-running/durable execution.
 
-Constraints: a 7-day build; must be defensible in a 1-hour panel where *engineering judgement* is graded, not just whether it runs; builder prefers model-agnostic and is not deeply technical (so explainability matters).
+Constraints: a tight build timeline; the design must be clearly defensible — *engineering judgement* matters, not just whether it runs; builder prefers model-agnostic and values explainability.
 
 The decision: how to structure the agent loop — a minimal hand-written tool-calling loop, or an orchestration framework (LangGraph).
 
@@ -33,12 +33,12 @@ Two constraints baked in from day one:
 
 ## Alternatives considered
 - **LangGraph (graph orchestration).** *Rejected for v1.* Its value-adds — durable execution, HITL, parallelism, complex branching/retry — none apply to a single-agent, five-tool, request/response flow. It would add abstraction we'd have to explain and defend with no benefit, against Anthropic's own guidance to avoid unnecessary framework layers. Reserved for if the flow grows (see revisit trigger) — **which it now has: the proactive briefing is built as a LangGraph graph ([ADR-008](ADR-008-langgraph-proactive-path.md))**. Reference point: a separate, more complex agent design (parallel screening + a human sign-off gate) *did* warrant LangGraph — this doesn't.
-- **Hard-coded workflow (fixed tool sequence).** *Rejected* — conflicts with the brief's "must select tools dynamically" requirement.
+- **Hard-coded workflow (fixed tool sequence).** *Rejected* — conflicts with the dynamic-tool-selection requirement.
 
 ## Consequences
-- ✅ Maximally explainable — the loop describes in one breath; ideal for the panel's judgement assessment.
+- ✅ Maximally explainable — the loop describes in one breath; ideal for maintainability and onboarding.
 - ✅ Minimal dependencies, fast to build, easy to debug.
 - ✅ Tools, RBAC, MCP server, and evals are all framework-neutral and reusable.
-- ✅ Strong panel narrative: right-sizing demonstrated; "why not LangGraph?" and "how would it evolve?" both have ready answers.
+- ✅ Clear design rationale: right-sizing demonstrated; "why not LangGraph?" and "how would it evolve?" both have ready answers.
 - ⚠️ We hand-write the loop (small) and session handling (via Redis) rather than inheriting them from a framework — accepted, and isolated in one module so it stays swappable.
 - ⚠️ No built-in checkpointing / pause-resume — fine, because no story needs it; if one arises, that's the trigger to revisit (above).

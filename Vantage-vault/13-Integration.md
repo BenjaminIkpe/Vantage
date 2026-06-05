@@ -25,7 +25,7 @@ A B2B payments platform Acme's size doesn't build a custom system of record — 
 | Internal handoffs | Slack / Microsoft Teams; PagerDuty for Sev | escalation channels |
 | Knowledge base | Notion / Confluence / Guru | runbooks + past resolutions |
 
-Our committed Postgres seed ([12-Data](12-Data.md)) is fixture-for-the-assessment; in production it becomes a scoped context graph (below), not the system of record.
+Our committed Postgres seed ([12-Data](12-Data.md)) is a fixture for the prototype; in production it becomes a scoped context graph (below), not the system of record.
 
 ## Federated query vs scoped context graph (and why proactive forces the graph)
 
@@ -69,7 +69,7 @@ Vantage becomes an **MCP client of multiple specialised MCP servers**, with our 
 ## What stays the same vs what changes
 The dividend of [ADR-003](05-Decisions/ADR-003-mcp-server.md) lands hardest here: the agent doesn't touch the data layer, only named tools.
 
-| Layer | Today (assessment) | Production (Acme stack) | Change? |
+| Layer | Today (prototype) | Production (Acme stack) | Change? |
 |---|---|---|---|
 | Agent loop ([ADR-001](05-Decisions/ADR-001-agent-framework.md)) | Claude + tools | Claude + tools | **none** |
 | 11 tool names / signatures | `get_open_issues(customer)`… | `get_open_issues(customer)`… | **none** |

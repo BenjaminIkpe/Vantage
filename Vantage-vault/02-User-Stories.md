@@ -13,7 +13,7 @@ updated: 2026-05-27
 **Template:** *As a* `[role]`, *I want* `[capability]`, *so that* `[outcome]`. *Acceptance:* `[observable, testable check]`.
 
 > [!NOTE] Role-mapping assumption
-> The brief names three staff types (sales, support, operations) and three roles (`sales_user`, `support_user`, `admin`). We map sales→`sales_user`, support→`support_user`, operations→`admin`. Reasonable, but an interpretation — confirm / log as an ADR.
+> The spec defines three staff types (sales, support, operations) and three roles (`sales_user`, `support_user`, `admin`). We map sales→`sales_user`, support→`support_user`, operations→`admin`. Reasonable, but an interpretation — confirm / log as an ADR.
 
 ## `sales_user` — account management, read-only
 *Brief §4.4: read-only access to customer and issue data.*

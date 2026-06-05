@@ -8,7 +8,7 @@ updated: 2026-05-29
 # Architecture
 
 > [!NOTE] Purpose
-> The design that serves the stories and scope. Each non-obvious choice has an ADR in [05-Decisions](05-Decisions/). Feeds the README + the architecture diagram (Deliverable 3). **Design locked; the diagram is rendered during the build.**
+> The design that serves the stories and scope. Each non-obvious choice has an ADR in [05-Decisions](05-Decisions/). Feeds the README + the architecture diagram. **Design locked; the diagram is rendered during the build.**
 
 ## Decisions locked
 - **[ADR-001](05-Decisions/ADR-001-agent-framework.md)** — agent = simple tool-calling loop (not LangGraph); model-agnostic; built for a contained LangGraph migration.
@@ -73,7 +73,7 @@ See [ADR-006](05-Decisions/ADR-006-memory-split.md).
 - **Rule:** never the system of record in Redis; a Redis wipe loses only in-flight context, never business data.
 
 ## Diagram
-Mermaid — renders in both Obsidian and on GitHub (portable; lift into the README at submission).
+Mermaid — renders in both Obsidian and on GitHub (portable; mirrored in the README).
 
 ```mermaid
 flowchart TD

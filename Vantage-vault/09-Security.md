@@ -8,7 +8,7 @@ updated: 2026-05-27
 # Security posture & threat model
 
 > [!NOTE] Purpose
-> Build "above board" for a critiqued app: threat-model with an attacker's eye, bake defences into every slice, and be explicit about dev-vs-production hardening. Feeds the README + the panel's "what would you harden?" question.
+> Build "above board" for a security-sensitive app: threat-model with an attacker's eye, bake defences into every slice, and be explicit about dev-vs-production hardening. Documented in the README; it informs the dev→prod hardening plan.
 
 ## On the Keycloak "JDBC ResultSet leaked" warning
 **Benign.** It's logged by Keycloak's *own* connection pool (Agroal) during its Liquibase schema-init against the **H2 dev database** — inside Keycloak's bootstrap, not our code, and it doesn't affect token issuance or security. It does, however, correctly flag that we run Keycloak in **dev mode**, which has insecure-by-design conveniences — tracked below.
@@ -24,7 +24,7 @@ updated: 2026-05-27
 | T6 | Secrets exposure | Secrets via env / `.env` (git-ignored); `.env.example` is placeholders only; no real keys committed. |
 | T7 | Sensitive data in logs | Audit/tool logs record identifiers + actions — **not** tokens or full PII. |
 
-## Dev-mode now → production hardening ("what would you harden?")
+## Dev-mode now → production hardening
 - Keycloak `start-dev` + H2 → production `start` + a real DB + TLS + persistence.
 - ROPC / `directAccessGrantsEnabled` (dev token-fetch) → **authorization-code flow**.
 - `redirectUris` / `webOrigins: ["*"]` → explicit allow-lists.

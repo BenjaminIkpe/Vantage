@@ -13,7 +13,7 @@ supersedes:
 **Date:** 2026-05-27
 
 ## Context
-Three roles with different rights (§4.4): `sales_user` (read-only), `support_user` (read + update issues), `admin` (full, incl. next actions). The agent is an LLM that dynamically chooses tools (ADR-001). We must enforce who-can-do-what reliably and provably (incl. a *denied* case), and explain it in the panel.
+Three roles with different rights: `sales_user` (read-only), `support_user` (read + update issues), `admin` (full, incl. next actions). The agent is an LLM that dynamically chooses tools (ADR-001). We must enforce who-can-do-what reliably and provably (incl. a *denied* case), and document it clearly.
 
 The danger: enforcing permissions in the LLM prompt ("don't let sales update"). **An LLM is not a security boundary** — it can be talked around or simply slip.
 
@@ -34,6 +34,6 @@ This is the documented #1 MCP authorization pattern (tool-level RBAC). *The LLM 
 
 ## Consequences
 - ✅ Security holds regardless of what the model does or is prompted into.
-- ✅ Produces the brief's required *denied* case and an audit trail (who attempted what).
+- ✅ Produces the required *denied* case and an audit trail (who attempted what).
 - ✅ Framework- and transport-agnostic — the check lives in the tool whether transport is stdio or HTTP, loop or LangGraph.
 - ⚠️ The verified role must be threaded to every tool call (in-process for stdio; across the boundary for HTTP — see ADR-003). Accepted; it's the one integration point to get right.
